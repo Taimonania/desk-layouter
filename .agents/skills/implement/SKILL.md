@@ -13,3 +13,5 @@ Run typechecking regularly, single test files regularly, and the full test suite
 Once done, use /code-review to review the work.
 
 Commit your work to the current branch.
+
+As the final step, open a PR against `main` and merge it — resolving an issue is not complete until its PR is opened and merged (see AGENTS.md, "Resolving an issue").
