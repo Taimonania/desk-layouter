@@ -2,18 +2,31 @@ import AppKit
 import DeskLayouterCore
 import DeskLayouterMacOS
 
-/// One Assignment shown in the editor's overview list.
-struct AssignmentRow: Identifiable, Equatable {
-    let bundleIdentifier: String
-    let displayName: String
-    let desktopNumber: Int
+/// The feedback shown after an Apply attempt, so the view can style success and
+/// failure differently and surface actionable detail.
+enum ApplyFeedback: Equatable {
+    case none
+    case info(String)
+    case success(String)
+    case failure(String)
 
-    var id: String { bundleIdentifier }
+    var message: String {
+        switch self {
+        case .none: ""
+        case let .info(text), let .success(text), let .failure(text): text
+        }
+    }
+
+    var isFailure: Bool {
+        if case .failure = self { return true }
+        return false
+    }
 }
 
 @MainActor
 final class EditorModel: ObservableObject {
-    // Add-flow inputs (the #6 picker plus the chosen Desktop).
+    // Add-flow inputs (the searchable installed-app picker plus the chosen
+    // destination Desktop).
     @Published var searchText = ""
     @Published var showRunningOnly = false
     @Published var newAssignmentDesktopNumber = 1
@@ -21,37 +34,35 @@ final class EditorModel: ObservableObject {
     @Published private(set) var applications: [InstalledApplication] = []
     @Published private(set) var selectedApplicationName = "No application selected"
 
-    // Overview + constraints.
-    @Published private(set) var assignments: [AssignmentRow] = []
+    // Board projection + pending state.
+    @Published private(set) var columns: [DesktopColumn] = []
     @Published private(set) var desktopCount = 0
-    @Published private(set) var statusMessage = ""
+    @Published private(set) var pendingChangeCount = 0
+    @Published private(set) var feedback: ApplyFeedback = .none
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
-    private let configurationStore: ConfigurationStore
+    private let boardStateStore: BoardStateStore
     private let applicationsProvider: any InstalledApplicationsProviding
-    private var configuration: DeskLayouterConfiguration
+    private var board: BoardState
     private var selectedApplication: SelectedApplication?
 
     init(
         assignmentPlanner: AssignmentPlanner = AssignmentPlanner(),
         spacesAdapter: any SpacesAdapter = MacOSSpacesAdapter(),
-        configurationStore: ConfigurationStore = .default,
+        boardStateStore: BoardStateStore = .default,
         applicationsProvider: any InstalledApplicationsProviding = SystemInstalledApplicationsProvider()
     ) {
         self.assignmentPlanner = assignmentPlanner
         self.spacesAdapter = spacesAdapter
-        self.configurationStore = configurationStore
+        self.boardStateStore = boardStateStore
         self.applicationsProvider = applicationsProvider
-        // Load the saved source-of-truth config so the editor reflects the
-        // previously applied Assignments on launch. A missing file loads as an
-        // empty configuration; a read failure falls back to empty rather than
-        // blocking launch.
-        configuration = (try? configurationStore.load()) ?? DeskLayouterConfiguration()
-        syncAssignments()
-        // The application list and Desktop snapshot are loaded when the editor
-        // appears (`refresh()`), not here, so opening the window scans once and
-        // re-scans on each reopen to keep both current.
+        // Load the saved board state so the editor reflects both the previously
+        // applied Assignments and any edits that were pending at last quit. A
+        // missing file loads as an empty board; a read failure falls back to
+        // empty rather than blocking launch.
+        board = (try? boardStateStore.load()) ?? BoardState()
+        syncBoard()
     }
 
     /// The applications the picker shows, filtered by the current search text and
@@ -69,6 +80,18 @@ final class EditorModel: ObservableObject {
     /// choices and accept new Assignments.
     var canEditAssignments: Bool { desktopCount > 0 }
 
+    /// True when there are pending changes to write, so Apply is enabled. Apply is
+    /// disabled on a clean board.
+    var canApply: Bool { board.isDirty }
+
+    /// The status text shown beneath the board.
+    var statusMessage: String { feedback.message }
+
+    /// The real application icon for a card, resolved in the macOS layer.
+    func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
+        applicationsProvider.icon(forBundleIdentifier: bundleIdentifier)
+    }
+
     /// Re-enumerates installed/running applications and re-reads the Desktop
     /// snapshot. Called on launch and whenever the editor is shown, so the
     /// running state and the available Desktops stay current.
@@ -81,9 +104,10 @@ final class EditorModel: ObservableObject {
         applications = applicationsProvider.applications()
     }
 
-    /// Reads the current Desktops on the built-in display so Desktop choices are
-    /// constrained to Desktops that actually exist. A read failure surfaces the
-    /// adapter's error and disables adding rather than offering invalid Desktops.
+    /// Reads the current Desktops on the built-in display so the board renders one
+    /// column per real Desktop and Desktop choices are constrained to Desktops
+    /// that actually exist. A read failure surfaces the adapter's error and leaves
+    /// the board with no columns rather than offering invalid Desktops.
     func refreshDesktops() {
         do {
             let snapshot = try spacesAdapter.currentDesktopSnapshot()
@@ -91,8 +115,9 @@ final class EditorModel: ObservableObject {
             newAssignmentDesktopNumber = min(max(newAssignmentDesktopNumber, 1), max(desktopCount, 1))
         } catch {
             desktopCount = 0
-            statusMessage = error.localizedDescription
+            feedback = .failure(error.localizedDescription)
         }
+        syncBoard()
     }
 
     /// Selects an application from the picker to feed into a new Assignment.
@@ -109,27 +134,26 @@ final class EditorModel: ObservableObject {
             bundleIdentifier: match.bundleIdentifier
         )
         selectedApplicationName = match.displayName
-        statusMessage = ""
     }
 
-    /// Adds the picked application at the chosen Desktop as a new Assignment (or
-    /// updates it if the app is already managed). Persists the source of truth so
-    /// the change survives relaunch; macOS is only touched on Apply.
+    /// Adds the picked application at the chosen destination Desktop as a new
+    /// Assignment (or updates it if the app is already managed). Persists the
+    /// board so the change survives relaunch; macOS is only touched on Apply.
     func addAssignment() {
         guard let selectedApplication else {
-            statusMessage = "Choose an application to assign."
+            feedback = .info("Choose an application to add.")
             return
         }
         guard canEditAssignments else {
-            statusMessage = "No Desktops are available on the built-in display."
+            feedback = .info("No Desktops are available on the built-in display.")
             return
         }
         guard (1...desktopCount).contains(newAssignmentDesktopNumber) else {
-            statusMessage = desktopDoesNotExistMessage(newAssignmentDesktopNumber)
+            feedback = .info(desktopDoesNotExistMessage(newAssignmentDesktopNumber))
             return
         }
 
-        configuration.upsert(
+        board.assign(
             ManagedApplication(
                 bundleIdentifier: selectedApplication.bundleIdentifier,
                 displayName: selectedApplication.displayName,
@@ -137,93 +161,112 @@ final class EditorModel: ObservableObject {
             )
         )
         persist(
-            successMessage: "Added \(selectedApplication.displayName) → Desktop \(newAssignmentDesktopNumber). Click Apply to enforce it."
+            info: "Added \(selectedApplication.displayName) → Desktop \(newAssignmentDesktopNumber). Click Apply to enforce it."
         )
     }
 
-    /// Changes an existing managed Assignment to a different Desktop.
-    func changeDesktop(forBundleIdentifier bundleIdentifier: String, to desktopNumber: Int) {
-        guard let application = configuration.managedApplication(for: bundleIdentifier) else {
-            return
-        }
-        // `canEditAssignments` short-circuits before the range is formed, so a
-        // failed Desktop snapshot (`desktopCount == 0`) can never build `1...0`.
+    /// Moves a card to a specific Desktop. Both drag-and-drop and the keyboard
+    /// arrow controls call here. A move to the same Desktop, or of an unmanaged
+    /// bundle identifier, changes nothing.
+    func move(bundleIdentifier: String, toDesktop desktopNumber: Int) {
         guard canEditAssignments, (1...desktopCount).contains(desktopNumber) else {
-            statusMessage = desktopDoesNotExistMessage(desktopNumber)
             return
         }
-        configuration.upsert(
-            ManagedApplication(
-                bundleIdentifier: application.bundleIdentifier,
-                displayName: application.displayName,
-                desktopNumber: desktopNumber
-            )
-        )
-        persist(
-            successMessage: "Changed \(application.displayName) → Desktop \(desktopNumber). Click Apply to enforce it."
-        )
+        let before = board
+        board.move(bundleIdentifier: bundleIdentifier, toDesktop: desktopNumber)
+        guard board != before else { return }
+        persist(info: "Moved to Desktop \(desktopNumber). Click Apply to enforce it.")
     }
 
-    /// Removes an Assignment. The app returns to unassigned on the next Apply,
-    /// which deletes only its owned key from the macOS bindings.
+    /// Moves a card one Desktop left (`-1`) or right (`+1`) for keyboard-only
+    /// operation, clamped to the Desktops that exist.
+    func moveCard(bundleIdentifier: String, by offset: Int) {
+        guard let current = board.columns(desktopCount: desktopCount)
+            .first(where: { $0.cards.contains { $0.bundleIdentifier == bundleIdentifier } })
+        else {
+            return
+        }
+        let target = current.number + offset
+        guard (1...max(desktopCount, 1)).contains(target) else { return }
+        move(bundleIdentifier: bundleIdentifier, toDesktop: target)
+    }
+
+    /// Removes an Assignment from the board. Only this app is affected; the app
+    /// returns to opening wherever on the next Apply, which deletes only its owned
+    /// key from the macOS bindings.
     func removeAssignment(bundleIdentifier: String) {
-        guard let application = configuration.managedApplication(for: bundleIdentifier) else {
-            return
-        }
-        configuration.remove(bundleIdentifier: bundleIdentifier)
-        persist(
-            successMessage: "Removed \(application.displayName). Click Apply to return it to opening wherever."
-        )
+        let before = board
+        board.remove(bundleIdentifier: bundleIdentifier)
+        guard board != before else { return }
+        persist(info: "Removed the Assignment. Click Apply to return the app to opening wherever.")
     }
 
-    /// Applies every managed Assignment to both macOS representations.
-    ///
-    /// The complete post-change persistent dictionary and the current-session
-    /// update are computed inside the adapter from the saved source of truth:
-    /// the planner resolves managed Desktop numbers to UUIDs (skipping Desktops
-    /// that no longer exist), and the full set of managed bundle identifiers is
-    /// handed over as the ownership set so removed Assignments delete only their
-    /// own keys.
+    /// Applies every managed Assignment to both macOS representations, reusing the
+    /// existing delete-aware adapter path (managed bindings plus managed-owned
+    /// keys, unmanaged preserved). On success the board's applied baseline is
+    /// advanced so it becomes clean; on failure the board stays dirty and can be
+    /// retried.
     func apply() {
+        guard board.isDirty else {
+            feedback = .info("No changes to apply.")
+            return
+        }
         do {
             let snapshot = try spacesAdapter.currentDesktopSnapshot()
             let managedBindings = assignmentPlanner.appBindings(
-                for: configuration.assignments,
+                for: board.configuration.assignments,
                 on: snapshot
             )
             try spacesAdapter.apply(
                 managedBindings: managedBindings,
-                managedBundleIdentifiers: configuration.ownedBundleIdentifiers
+                managedBundleIdentifiers: board.configuration.ownedBundleIdentifiers
             )
-            // The removed apps' keys are now gone from both representations, so
-            // forget them and persist the cleared source of truth.
-            configuration.clearPendingRemovals()
-            let count = configuration.managedApplications.count
-            let noun = count == 1 ? "Assignment" : "Assignments"
-            var message = "Applied \(count) \(noun). Already-running applications use their new Desktop only after you quit and relaunch them."
+            board.markApplied()
+            var message = appliedSummary()
             do {
-                try configurationStore.save(configuration)
+                try boardStateStore.save(board)
             } catch {
                 // Apply itself succeeded; only the bookkeeping save failed. Say so
                 // rather than hiding it — the removed keys are simply re-deleted
                 // (idempotently) on the next Apply.
-                message += " (Could not save configuration: \(error.localizedDescription))"
+                message += " (Could not save board state: \(error.localizedDescription))"
             }
-            statusMessage = message
+            feedback = .success(message)
+            syncBoard()
         } catch {
-            statusMessage = error.localizedDescription
+            feedback = .failure("Apply failed: \(error.localizedDescription). Your changes are still pending — fix the issue and try again.")
         }
     }
 
-    /// Saves the source of truth and refreshes the overview, reporting a save
-    /// failure rather than silently losing the edit.
-    private func persist(successMessage: String) {
+    /// The success message after Apply, naming the currently-running managed apps
+    /// that must be quit and relaunched before they use their new Desktop.
+    private func appliedSummary() -> String {
+        let count = board.configuration.managedApplications.count
+        let noun = count == 1 ? "Assignment" : "Assignments"
+        var message = "Applied \(count) \(noun)."
+
+        let managedIdentifiers = Set(board.configuration.managedApplications.map(\.bundleIdentifier))
+        let runningNames = applications
+            .filter { $0.isRunning && managedIdentifiers.contains($0.bundleIdentifier) }
+            .map(\.displayName)
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        if runningNames.isEmpty {
+            message += " Newly launched apps open on their assigned Desktop."
+        } else {
+            message += " Quit and relaunch these already-running apps before they use their new Desktop: \(runningNames.joined(separator: ", "))."
+        }
+        return message
+    }
+
+    /// Saves the board and refreshes the projection, reporting a save failure
+    /// rather than silently losing the edit.
+    private func persist(info: String) {
         do {
-            try configurationStore.save(configuration)
-            syncAssignments()
-            statusMessage = successMessage
+            try boardStateStore.save(board)
+            syncBoard()
+            feedback = .info(info)
         } catch {
-            statusMessage = "Could not save the configuration: \(error.localizedDescription)"
+            feedback = .failure("Could not save the board: \(error.localizedDescription)")
         }
     }
 
@@ -231,14 +274,9 @@ final class EditorModel: ObservableObject {
         "Desktop \(desktopNumber) does not exist on the built-in display."
     }
 
-    private func syncAssignments() {
-        assignments = configuration.managedApplications.map {
-            AssignmentRow(
-                bundleIdentifier: $0.bundleIdentifier,
-                displayName: $0.displayName,
-                desktopNumber: $0.desktopNumber
-            )
-        }
+    private func syncBoard() {
+        columns = board.columns(desktopCount: desktopCount)
+        pendingChangeCount = board.pendingChangeCount
     }
 }
 
