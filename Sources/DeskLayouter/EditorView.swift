@@ -1,3 +1,4 @@
+import AppKit
 import DeskLayouterCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -6,55 +7,113 @@ struct EditorView: View {
     @ObservedObject var model: EditorModel
     @State private var dropTargetDesktop: Int?
 
+    private static let boardPadding: CGFloat = 20
+
+    /// Strips the ".app" bundle extension for display — users think in terms of
+    /// application names ("Spotify"), not bundle file names ("Spotify.app").
+    static func appDisplayName(_ rawName: String) -> String {
+        rawName.lowercased().hasSuffix(".app") ? String(rawName.dropLast(4)) : rawName
+    }
+
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
+        GeometryReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
+                // Fixed header — always visible, never clipped by a scroll.
                 header
-                board
-                Divider()
-                addAssignment
+
+                // The Desktops board is the primary canvas: it gets the flexible
+                // space and its own scroll region for when there are many
+                // Desktops/apps. Apply sits directly beneath it.
+                ScrollView(.vertical, showsIndicators: true) {
+                    board(availableWidth: proxy.size.width - Self.boardPadding * 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: .infinity)
+
                 applyBar
                 feedback
+
+                Divider()
+
+                // The installed-apps picker keeps the only other scroll region,
+                // in its own bounded pane at the bottom — no scroll-within-scroll.
+                addAssignment
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Self.boardPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .frame(minWidth: 760, minHeight: 580)
         .onAppear { model.refresh() }
+        // The Desktop list is a point-in-time snapshot; re-read it when the
+        // active Space changes (e.g. the user just added or removed a Desktop in
+        // Mission Control) so the board reflects Desktops added while it's open.
+        .onReceive(
+            NSWorkspace.shared.notificationCenter.publisher(
+                for: NSWorkspace.activeSpaceDidChangeNotification
+            )
+        ) { _ in
+            model.refreshDesktops()
+        }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Desk Layouter")
-                .font(.title2)
-                .fontWeight(.semibold)
-            Text("Organize your applications across Desktops. Editing this board changes only Desk Layouter — macOS opens apps on their new Desktop only after you Apply.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Desk Layouter")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Text("Organize your applications across Desktops. Editing this board changes only Desk Layouter — macOS opens apps on their new Desktop only after you Apply.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button {
+                model.refresh()
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .help("Re-read the current Desktops and installed applications")
+            .accessibilityLabel("Refresh Desktops and applications")
         }
     }
 
     // MARK: - Board
 
-    private var board: some View {
-        Group {
-            if model.columns.isEmpty {
-                Text("No Desktops were found on the built-in display.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 160)
-            } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 14)],
-                    alignment: .leading,
-                    spacing: 14
-                ) {
-                    ForEach(model.columns) { column in
-                        desktopColumn(column)
-                    }
+    @ViewBuilder
+    private func board(availableWidth: CGFloat) -> some View {
+        if model.columns.isEmpty {
+            Text("No Desktops were found on the built-in display.")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 160)
+        } else {
+            LazyVGrid(
+                columns: gridColumns(availableWidth: availableWidth),
+                alignment: .leading,
+                spacing: 14
+            ) {
+                ForEach(model.columns) { column in
+                    desktopColumn(column)
                 }
-                .padding(.vertical, 2)
             }
+            .padding(.vertical, 2)
         }
+    }
+
+    /// Flexible columns that stretch to fill the available width, but never more
+    /// columns than there are Desktops — so e.g. three Desktops fill the row
+    /// evenly instead of leaving a gap that reads as a reserved fourth slot. When
+    /// the window is too narrow to fit every Desktop at a comfortable width, the
+    /// extra Desktops wrap onto additional rows.
+    private func gridColumns(availableWidth: CGFloat) -> [GridItem] {
+        let minColumnWidth: CGFloat = 210
+        let spacing: CGFloat = 14
+        let usableWidth = max(availableWidth, minColumnWidth)
+        let columnsThatFit = max(1, Int((usableWidth + spacing) / (minColumnWidth + spacing)))
+        let columnCount = min(columnsThatFit, max(model.columns.count, 1))
+        return Array(
+            repeating: GridItem(.flexible(minimum: minColumnWidth), spacing: spacing),
+            count: columnCount
+        )
     }
 
     private func desktopColumn(_ column: DesktopColumn) -> some View {
@@ -117,7 +176,7 @@ struct EditorView: View {
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
             icon(for: card)
-            Text(card.displayName)
+            Text(Self.appDisplayName(card.displayName))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)
@@ -222,7 +281,7 @@ struct EditorView: View {
                 )
             ) { application in
                 HStack {
-                    Text(application.displayName)
+                    Text(Self.appDisplayName(application.displayName))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
@@ -234,11 +293,11 @@ struct EditorView: View {
                 }
                 .tag(application.bundleIdentifier)
             }
-            .frame(minHeight: 120)
+            .frame(height: 180)
 
             HStack {
                 Text("Selected")
-                Text(model.selectedApplicationName)
+                Text(Self.appDisplayName(model.selectedApplicationName))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(.secondary)
