@@ -12,13 +12,14 @@ struct EditorView: View {
             Text("Choose one installed application and the Desktop where macOS should open it.")
                 .foregroundStyle(.secondary)
 
+            applicationPicker
+
             HStack {
-                Button("Choose Application…") {
-                    model.chooseApplication()
-                }
+                Text("Selected")
                 Text(model.selectedApplicationName)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .foregroundStyle(.secondary)
             }
 
             HStack {
@@ -42,10 +43,43 @@ struct EditorView: View {
                     .font(.callout)
                     .textSelection(.enabled)
             }
-
-            Spacer()
         }
         .padding(24)
-        .frame(minWidth: 520, minHeight: 300)
+        .frame(minWidth: 520, minHeight: 480)
+        .onAppear { model.refreshApplications() }
+    }
+
+    private var applicationPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                TextField("Search applications", text: $model.searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Search applications")
+                Toggle("Currently running", isOn: $model.showRunningOnly)
+                    .toggleStyle(.checkbox)
+            }
+
+            List(
+                model.visibleApplications,
+                selection: Binding(
+                    get: { model.selectedBundleIdentifier },
+                    set: { model.selectApplication(withBundleIdentifier: $0) }
+                )
+            ) { application in
+                HStack {
+                    Text(application.displayName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    if application.isRunning {
+                        Text("Running")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tag(application.bundleIdentifier)
+            }
+            .frame(minHeight: 160)
+        }
     }
 }
