@@ -1,5 +1,6 @@
 import AppKit
 import DeskLayouterCore
+import DeskLayouterMacOS
 import UniformTypeIdentifiers
 
 @MainActor

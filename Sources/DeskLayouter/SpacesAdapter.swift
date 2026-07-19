@@ -1,17 +1,21 @@
 import ColorSync
 import CoreGraphics
+import Darwin
 import DeskLayouterCore
 import Foundation
 
-protocol SpacesAdapter {
+public protocol SpacesAdapter {
     func currentDesktopSnapshot() throws -> DesktopSnapshot
     func apply(appBindings: [String: String]) throws
 }
 
-final class MacOSSpacesAdapter: SpacesAdapter {
+public final class MacOSSpacesAdapter: SpacesAdapter {
     private let commandRunner = CommandRunner()
+    private let sessionBindingUpdater = SessionBindingUpdater()
 
-    func currentDesktopSnapshot() throws -> DesktopSnapshot {
+    public init() {}
+
+    public func currentDesktopSnapshot() throws -> DesktopSnapshot {
         let builtInDisplayIdentifier = try builtInDisplayIdentifier()
         let store = try readStore()
         guard
@@ -66,9 +70,14 @@ final class MacOSSpacesAdapter: SpacesAdapter {
         return CFUUIDCreateString(nil, displayUUID) as String
     }
 
-    func apply(appBindings: [String: String]) throws {
-        for bundleIdentifier in appBindings.keys.sorted() {
-            guard let desktopUUID = appBindings[bundleIdentifier] else {
+    public func apply(appBindings: [String: String]) throws {
+        let normalizedBindings = Dictionary(
+            appBindings.map { ($0.key.lowercased(), $0.value) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+
+        for bundleIdentifier in normalizedBindings.keys.sorted() {
+            guard let desktopUUID = normalizedBindings[bundleIdentifier] else {
                 continue
             }
 
@@ -92,13 +101,16 @@ final class MacOSSpacesAdapter: SpacesAdapter {
 
         let store = try readStore()
         let writtenBindings = store["app-bindings"] as? [String: Any] ?? [:]
-        let missingBindings = appBindings.filter { bundleIdentifier, desktopUUID in
+        let missingBindings = normalizedBindings.filter { bundleIdentifier, desktopUUID in
             writtenBindings[bundleIdentifier] as? String != desktopUUID
         }
 
         guard missingBindings.isEmpty else {
             throw SpacesAdapterError.verificationFailed(bundleIdentifiers: missingBindings.keys.sorted())
         }
+
+        let completeBindings = writtenBindings.compactMapValues { $0 as? String }
+        try sessionBindingUpdater.update(appBindings: completeBindings)
     }
 
     private func readStore() throws -> [String: Any] {
@@ -119,6 +131,7 @@ enum SpacesAdapterError: LocalizedError {
     case commandFailed(executable: String, status: Int32, message: String)
     case displayEnumerationFailed
     case noDesktopsFound
+    case sessionBindingAPIUnavailable
     case storeFormatChanged
     case verificationFailed(bundleIdentifiers: [String])
 
@@ -132,11 +145,57 @@ enum SpacesAdapterError: LocalizedError {
             "The active displays could not be read."
         case .noDesktopsFound:
             "No Desktops were found on the built-in display."
+        case .sessionBindingAPIUnavailable:
+            "The macOS Desktop session binding API is unavailable."
         case .storeFormatChanged:
             "The macOS Desktop store has an unrecognized format."
         case let .verificationFailed(bundleIdentifiers):
             "Apply could not verify the Assignment for \(bundleIdentifiers.joined(separator: ", "))."
         }
+    }
+}
+
+private typealias MainConnectionFunction = @convention(c) () -> Int32
+private typealias SetSessionBindingsFunction = @convention(c) (
+    Int32,
+    CFDictionary
+) -> Void
+
+private struct SessionBindingUpdater {
+    func update(appBindings: [String: String]) throws {
+        // On macOS 26, app-bindings persists Assignments but does not update the
+        // WindowServer session. Dock's Assign To action calls this private setter.
+        guard let skyLight = dlopen(
+            "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+            RTLD_NOW
+        ) else {
+            throw SpacesAdapterError.sessionBindingAPIUnavailable
+        }
+        defer { dlclose(skyLight) }
+
+        guard
+            let mainConnectionSymbol = dlsym(skyLight, "SLSMainConnectionID")
+                ?? dlsym(skyLight, "CGSMainConnectionID"),
+            let setterSymbol = dlsym(
+                skyLight,
+                "SLSSessionSetCurrentSessionWorkspaceApplicationBindings"
+            ) ?? dlsym(
+                skyLight,
+                "CGSSessionSetCurrentSessionWorkspaceApplicationBindings"
+            )
+        else {
+            throw SpacesAdapterError.sessionBindingAPIUnavailable
+        }
+
+        let mainConnection = unsafeBitCast(
+            mainConnectionSymbol,
+            to: MainConnectionFunction.self
+        )
+        let setSessionBindings = unsafeBitCast(
+            setterSymbol,
+            to: SetSessionBindingsFunction.self
+        )
+        setSessionBindings(mainConnection(), appBindings as CFDictionary)
     }
 }
 
