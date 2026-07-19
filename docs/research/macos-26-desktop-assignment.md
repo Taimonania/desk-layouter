@@ -50,10 +50,10 @@ Observed results:
 | Boundary | macOS build | Result | Notes |
 | --- | --- | --- | --- |
 | In-session `arm → restore` round-trip | 26.5.2 (25F84) | Verified | `app-bindings` returned exactly to its prior state; unmanaged binding preserved through Apply; state dir cleaned. Mechanics of the harness are sound. |
-| Logout / login rehydration | 26.5.2 (25F84) | **Pending human-gated verification** | Run `arm` → logout → `verify`. Fill in the observed managed-space placement here once observed. |
-| Reboot / login rehydration | 26.5.2 (25F84) | **Pending human-gated verification** | Run `arm` → reboot → `verify`. Fill in the observed managed-space placement here once observed. |
+| Logout / login rehydration | 26.5.2 (25F84) | **PASS (observed 2026-07-19)** | `arm` → logout/login (Desk Layouter not running) → `verify`: the fully-quit probe's new window opened on its assigned Desktop (managed space 3) from a different Desktop. Managed Assignment survived in the persistent store; the pre-seeded unmanaged binding was preserved; state fully restored afterward. macOS reconstructs the live current-session binding table from persisted `app-bindings` at login. |
+| Reboot / login rehydration | 26.5.2 (25F84) | **Not physically observed — accepted by maintainer** | The reboot cycle (`arm` → reboot → `verify`) was **not run**. On the maintainer's decision, this criterion is accepted by inference from the observed logout PASS: a reboot restores the live session table from the same persisted `com.apple.spaces` `app-bindings` that logout/login was just shown to rehydrate from. This is an inference, not an observation — see the residual gap below. |
 
-No product limitation is asserted for the logout/reboot cases yet, because the outcome has not been observed. If `verify` shows the probe does **not** rehydrate onto its assigned Desktop after a boundary, the resulting limitation (e.g. "re-Apply is required after each login") must be recorded here and in ADR-0001 at that time. Do not infer the outcome from persistent read-back alone.
+The logout/login boundary is confirmed on 26.5.2 (25F84): "configure once, macOS enforces at login" holds for a logout, with Desk Layouter not running. **Residual verification gap:** the reboot boundary was not physically exercised; it is assumed equivalent to logout because both rehydrate from the same persisted store. If a future run shows reboot does **not** rehydrate onto the assigned Desktop, record the resulting limitation (e.g. "re-Apply is required after reboot") here and in ADR-0001 at that time. Do not treat persistent read-back alone as proof of placement.
 
 ## Evidence standard and limits
 
