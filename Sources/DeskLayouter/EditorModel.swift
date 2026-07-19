@@ -62,7 +62,7 @@ final class EditorModel: ObservableObject {
         // missing file loads as an empty board; a read failure falls back to
         // empty rather than blocking launch.
         board = (try? boardStateStore.load()) ?? BoardState()
-        syncBoard()
+        refreshProjection()
     }
 
     /// The applications the picker shows, filtered by the current search text and
@@ -117,7 +117,7 @@ final class EditorModel: ObservableObject {
             desktopCount = 0
             feedback = .failure(error.localizedDescription)
         }
-        syncBoard()
+        refreshProjection()
     }
 
     /// Selects an application from the picker to feed into a new Assignment.
@@ -172,16 +172,15 @@ final class EditorModel: ObservableObject {
         guard canEditAssignments, (1...desktopCount).contains(desktopNumber) else {
             return
         }
-        let before = board
-        board.move(bundleIdentifier: bundleIdentifier, toDesktop: desktopNumber)
-        guard board != before else { return }
-        persist(info: "Moved to Desktop \(desktopNumber). Click Apply to enforce it.")
+        mutateAndPersist(info: "Moved to Desktop \(desktopNumber). Click Apply to enforce it.") {
+            $0.move(bundleIdentifier: bundleIdentifier, toDesktop: desktopNumber)
+        }
     }
 
     /// Moves a card one Desktop left (`-1`) or right (`+1`) for keyboard-only
     /// operation, clamped to the Desktops that exist.
     func moveCard(bundleIdentifier: String, by offset: Int) {
-        guard let current = board.columns(desktopCount: desktopCount)
+        guard let current = columns
             .first(where: { $0.cards.contains { $0.bundleIdentifier == bundleIdentifier } })
         else {
             return
@@ -195,10 +194,9 @@ final class EditorModel: ObservableObject {
     /// returns to opening wherever on the next Apply, which deletes only its owned
     /// key from the macOS bindings.
     func removeAssignment(bundleIdentifier: String) {
-        let before = board
-        board.remove(bundleIdentifier: bundleIdentifier)
-        guard board != before else { return }
-        persist(info: "Removed the Assignment. Click Apply to return the app to opening wherever.")
+        mutateAndPersist(info: "Removed the Assignment. Click Apply to return the app to opening wherever.") {
+            $0.remove(bundleIdentifier: bundleIdentifier)
+        }
     }
 
     /// Applies every managed Assignment to both macOS representations, reusing the
@@ -221,33 +219,42 @@ final class EditorModel: ObservableObject {
                 managedBindings: managedBindings,
                 managedBundleIdentifiers: board.configuration.ownedBundleIdentifiers
             )
+            // Capture what changed in this Apply before advancing the baseline, so
+            // the summary names only the apps whose Desktop actually changed.
+            let changedIdentifiers = Set(board.pendingChanges)
             board.markApplied()
-            var message = appliedSummary()
+            var message = appliedSummary(changedIdentifiers: changedIdentifiers)
             do {
                 try boardStateStore.save(board)
             } catch {
-                // Apply itself succeeded; only the bookkeeping save failed. Say so
+                // Apply itself succeeded; only the bookkeeping write failed. Say so
                 // rather than hiding it — the removed keys are simply re-deleted
                 // (idempotently) on the next Apply.
-                message += " (Could not save board state: \(error.localizedDescription))"
+                message += " (Could not store the board: \(error.localizedDescription))"
             }
             feedback = .success(message)
-            syncBoard()
+            refreshProjection()
         } catch {
             feedback = .failure("Apply failed: \(error.localizedDescription). Your changes are still pending — fix the issue and try again.")
         }
     }
 
-    /// The success message after Apply, naming the currently-running managed apps
-    /// that must be quit and relaunched before they use their new Desktop.
-    private func appliedSummary() -> String {
+    /// The success message after Apply, naming only the already-running apps whose
+    /// Assignment actually changed in this Apply — those are the ones that must be
+    /// quit and relaunched before they use their new Desktop. Unchanged apps and
+    /// removed apps are not listed.
+    private func appliedSummary(changedIdentifiers: Set<String>) -> String {
         let count = board.configuration.managedApplications.count
         let noun = count == 1 ? "Assignment" : "Assignments"
         var message = "Applied \(count) \(noun)."
 
         let managedIdentifiers = Set(board.configuration.managedApplications.map(\.bundleIdentifier))
         let runningNames = applications
-            .filter { $0.isRunning && managedIdentifiers.contains($0.bundleIdentifier) }
+            .filter {
+                $0.isRunning
+                    && changedIdentifiers.contains($0.bundleIdentifier)
+                    && managedIdentifiers.contains($0.bundleIdentifier)
+            }
             .map(\.displayName)
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         if runningNames.isEmpty {
@@ -258,15 +265,25 @@ final class EditorModel: ObservableObject {
         return message
     }
 
-    /// Saves the board and refreshes the projection, reporting a save failure
+    /// Applies a transition to the board and persists it, but only when it
+    /// actually changed something. This is the shared spine for the move and
+    /// remove intents so each need not repeat the change-detection and persistence.
+    private func mutateAndPersist(info: String, _ transition: (inout BoardState) -> Void) {
+        let before = board
+        transition(&board)
+        guard board != before else { return }
+        persist(info: info)
+    }
+
+    /// Stores the board and refreshes the projection, reporting a write failure
     /// rather than silently losing the edit.
     private func persist(info: String) {
         do {
             try boardStateStore.save(board)
-            syncBoard()
+            refreshProjection()
             feedback = .info(info)
         } catch {
-            feedback = .failure("Could not save the board: \(error.localizedDescription)")
+            feedback = .failure("Could not store the board: \(error.localizedDescription)")
         }
     }
 
@@ -274,7 +291,7 @@ final class EditorModel: ObservableObject {
         "Desktop \(desktopNumber) does not exist on the built-in display."
     }
 
-    private func syncBoard() {
+    private func refreshProjection() {
         columns = board.columns(desktopCount: desktopCount)
         pendingChangeCount = board.pendingChangeCount
     }
