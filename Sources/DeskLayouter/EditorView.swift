@@ -7,15 +7,18 @@ struct EditorView: View {
     @State private var dropTargetDesktop: Int?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            board
-            Divider()
-            addAssignment
-            applyBar
-            feedback
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                board
+                Divider()
+                addAssignment
+                applyBar
+                feedback
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(20)
         .frame(minWidth: 760, minHeight: 580)
         .onAppear { model.refresh() }
     }
@@ -40,15 +43,16 @@ struct EditorView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 160)
             } else {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(alignment: .top, spacing: 14) {
-                        ForEach(model.columns) { column in
-                            desktopColumn(column)
-                        }
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 14)],
+                    alignment: .leading,
+                    spacing: 14
+                ) {
+                    ForEach(model.columns) { column in
+                        desktopColumn(column)
                     }
-                    .padding(.vertical, 2)
                 }
-                .frame(minHeight: 220)
+                .padding(.vertical, 2)
             }
         }
     }
@@ -81,7 +85,7 @@ struct EditorView: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .frame(width: 240, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(dropTargetDesktop == column.number ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.06))
