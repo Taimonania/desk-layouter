@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct EditorView: View {
     @ObservedObject var model: EditorModel
     @State private var dropTargetDesktop: Int?
+    @State private var searchFieldWidth: CGFloat = 0
+    @State private var hoveredBundleIdentifier: String?
 
     private static let boardPadding: CGFloat = 20
 
@@ -21,28 +23,37 @@ struct EditorView: View {
                 // Fixed header — always visible, never clipped by a scroll.
                 header
 
-                // The Desktops board is the primary canvas: it gets the flexible
-                // space and its own scroll region for when there are many
-                // Desktops/apps. Apply sits directly beneath it.
-                ScrollView(.vertical, showsIndicators: true) {
-                    board(availableWidth: proxy.size.width - Self.boardPadding * 2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                // Search-to-add control row: type to filter installed apps; the
+                // results panel floats over the board just below (see the ZStack).
+                quickAdd
+
+                // The Desktops board is the primary canvas and takes the rest of
+                // the height. The search results float over it as a ZStack layer,
+                // so showing results never pushes the board down. Apply sits below.
+                ZStack(alignment: .topLeading) {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        board(availableWidth: proxy.size.width - Self.boardPadding * 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if !model.searchText.isEmpty {
+                        resultsDropdown
+                            .frame(width: searchFieldWidth > 0 ? searchFieldWidth : 380, alignment: .leading)
+                            .padding(.top, 4)
+                            .zIndex(1)
+                    }
                 }
                 .frame(maxHeight: .infinity)
 
                 applyBar
                 feedback
-
-                Divider()
-
-                // The installed-apps picker keeps the only other scroll region,
-                // in its own bounded pane at the bottom — no scroll-within-scroll.
-                addAssignment
             }
             .padding(Self.boardPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 760, minHeight: 580)
+        .frame(minWidth: 760, minHeight: 640)
+        .onPreferenceChange(SearchFieldWidthKey.self) { searchFieldWidth = $0 }
         .onAppear { model.refresh() }
         // The Desktop list is a point-in-time snapshot; re-read it when the
         // active Space changes (e.g. the user just added or removed a Desktop in
@@ -192,7 +203,7 @@ struct EditorView: View {
             moveButtons(for: card)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(card.displayName), Desktop \(card.desktopNumber). Draggable")
+        .accessibilityLabel("\(Self.appDisplayName(card.displayName)), Desktop \(card.desktopNumber). Draggable")
         .accessibilityActions {
             moveButtons(for: card)
         }
@@ -228,21 +239,12 @@ struct EditorView: View {
             }
             .buttonStyle(.borderless)
             .help("Remove this Assignment")
-            .accessibilityLabel("Remove \(card.displayName)")
+            .accessibilityLabel("Remove \(Self.appDisplayName(card.displayName))")
         }
     }
 
-    @ViewBuilder
     private func icon(for card: BoardCard) -> some View {
-        if let nsImage = model.icon(forBundleIdentifier: card.bundleIdentifier) {
-            Image(nsImage: nsImage)
-                .resizable()
-                .frame(width: 20, height: 20)
-        } else {
-            Image(systemName: "app.dashed")
-                .frame(width: 20, height: 20)
-                .foregroundStyle(.secondary)
-        }
+        iconView(forBundleIdentifier: card.bundleIdentifier)
     }
 
     private func handleDrop(_ providers: [NSItemProvider], onto desktopNumber: Int) -> Bool {
@@ -260,54 +262,131 @@ struct EditorView: View {
 
     // MARK: - Add flow
 
-    private var addAssignment: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Add an application")
-                .font(.headline)
+    // MARK: - Search-to-add
 
-            HStack {
-                TextField("Search applications", text: $model.searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Search applications")
-                Toggle("Currently running", isOn: $model.showRunningOnly)
-                    .toggleStyle(.checkbox)
+    private var quickAdd: some View {
+        HStack(spacing: 10) {
+            searchField
+            Toggle("Running only", isOn: $model.showRunningOnly)
+                .toggleStyle(.checkbox)
+                .fixedSize()
+                .disabled(!model.canEditAssignments)
+            Text("Add to")
+                .foregroundStyle(.secondary)
+            destinationPicker
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search applications to add", text: $model.searchText)
+                .textFieldStyle(.plain)
+                .accessibilityLabel("Search applications to add")
+            if !model.searchText.isEmpty {
+                Button {
+                    model.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel("Clear search")
             }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.25)))
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: SearchFieldWidthKey.self, value: proxy.size.width)
+            }
+        )
+        .onExitCommand { model.searchText = "" }
+    }
 
-            List(
-                model.visibleApplications,
-                selection: Binding(
-                    get: { model.selectedBundleIdentifier },
-                    set: { model.selectApplication(withBundleIdentifier: $0) }
-                )
-            ) { application in
-                HStack {
-                    Text(Self.appDisplayName(application.displayName))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    if application.isRunning {
-                        Text("Running")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+    /// Floating, scrollable results panel shown while searching. Clicking a row
+    /// adds that app to the chosen Desktop and clears the search.
+    private var resultsDropdown: some View {
+        let matches = model.visibleApplications
+        return VStack(spacing: 0) {
+            if matches.isEmpty {
+                Text("No matching applications")
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(matches.enumerated()), id: \.element.bundleIdentifier) { index, application in
+                            resultRow(application)
+                            if index < matches.count - 1 {
+                                Divider()
+                            }
+                        }
                     }
                 }
-                .tag(application.bundleIdentifier)
+                .frame(maxHeight: 200) // ~5 rows tall, then scrolls
             }
-            .frame(height: 180)
+        }
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.2)))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+    }
 
-            HStack {
-                Text("Selected")
-                Text(Self.appDisplayName(model.selectedApplicationName))
+    private func resultRow(_ application: InstalledApplication) -> some View {
+        Button {
+            model.selectApplication(withBundleIdentifier: application.bundleIdentifier)
+            model.addAssignment()
+            model.searchText = ""
+        } label: {
+            HStack(spacing: 8) {
+                iconView(forBundleIdentifier: application.bundleIdentifier)
+                Text(Self.appDisplayName(application.displayName))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                destinationPicker
-                Button("Add") {
-                    model.addAssignment()
+                Spacer(minLength: 8)
+                if application.isRunning {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 7, height: 7)
+                        .accessibilityLabel("Running")
                 }
-                .disabled(!model.canEditAssignments)
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(.secondary)
             }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                hoveredBundleIdentifier == application.bundleIdentifier
+                    ? Color.primary.opacity(0.06) : Color.clear
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canEditAssignments)
+        .onHover { isHovering in
+            if isHovering {
+                hoveredBundleIdentifier = application.bundleIdentifier
+            } else if hoveredBundleIdentifier == application.bundleIdentifier {
+                hoveredBundleIdentifier = nil
+            }
+        }
+        .accessibilityLabel("Add \(Self.appDisplayName(application.displayName)) to Desktop \(model.newAssignmentDesktopNumber)")
+    }
+
+    @ViewBuilder
+    private func iconView(forBundleIdentifier bundleIdentifier: String, size: CGFloat = 20) -> some View {
+        if let nsImage = model.icon(forBundleIdentifier: bundleIdentifier) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: "app.dashed")
+                .frame(width: size, height: size)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -360,5 +439,14 @@ struct EditorView: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Reports the search field's rendered width so the floating results dropdown can
+/// be sized to match it.
+private struct SearchFieldWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
