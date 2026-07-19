@@ -1,10 +1,16 @@
-.PHONY: build run test test-desktop-placement \
+.PHONY: build run relaunch test test-desktop-placement \
 	session-boundary-arm session-boundary-verify session-boundary-restore
 
 build:
 	./Scripts/build-app.sh
 
 run: build
+	open ".build/Desk Layouter.app"
+
+# Quit any running instance first, then rebuild and launch. Use this after code
+# changes: plain `run` won't replace an already-running menu-bar instance.
+relaunch: build
+	-pkill -x DeskLayouter
 	open ".build/Desk Layouter.app"
 
 test:
