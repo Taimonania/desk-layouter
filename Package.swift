@@ -17,18 +17,23 @@ let package = Package(
             dependencies: ["DeskLayouterCore"],
             path: "Sources/DeskLayouter",
             exclude: ["AppDelegate.swift", "EditorModel.swift", "EditorView.swift"],
-            sources: ["SpacesAdapter.swift"]
+            sources: ["SpacesAdapter.swift", "ConfigurationStore.swift"]
         ),
         .executableTarget(
             name: "DeskLayouter",
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Sources/DeskLayouter",
-            exclude: ["SpacesAdapter.swift"]
+            exclude: ["SpacesAdapter.swift", "ConfigurationStore.swift"]
         ),
         .executableTarget(
             name: "DeskLayouterPlannerTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterPlannerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterConfigStoreTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterConfigStoreTests"
         ),
         .executableTarget(
             name: "DeskLayouterDesktopPlacementTests",

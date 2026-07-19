@@ -11,14 +11,39 @@ final class EditorModel: ObservableObject {
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
+    private let configurationStore: ConfigurationStore
+    private var configuration: DeskLayouterConfiguration
     private var selectedApplication: SelectedApplication?
 
     init(
         assignmentPlanner: AssignmentPlanner = AssignmentPlanner(),
-        spacesAdapter: any SpacesAdapter = MacOSSpacesAdapter()
+        spacesAdapter: any SpacesAdapter = MacOSSpacesAdapter(),
+        configurationStore: ConfigurationStore = .default
     ) {
         self.assignmentPlanner = assignmentPlanner
         self.spacesAdapter = spacesAdapter
+        self.configurationStore = configurationStore
+        // Load the saved source-of-truth config so the editor reflects the
+        // previously applied configuration on launch. A missing file loads as an
+        // empty configuration; a read failure falls back to empty rather than
+        // blocking launch.
+        configuration = (try? configurationStore.load()) ?? DeskLayouterConfiguration()
+        reflectLastManagedApplication()
+    }
+
+    /// Reflects the most recently added managed application in the
+    /// single-assignment editor, so a relaunch shows the previously saved
+    /// configuration. The multi-assignment overview is issue #7.
+    private func reflectLastManagedApplication() {
+        guard let application = configuration.managedApplications.last else {
+            return
+        }
+        selectedApplication = SelectedApplication(
+            displayName: application.displayName,
+            bundleIdentifier: application.bundleIdentifier
+        )
+        selectedApplicationName = application.displayName
+        desktopNumber = String(application.desktopNumber)
     }
 
     func chooseApplication() {
@@ -66,8 +91,24 @@ final class EditorModel: ObservableObject {
                 bundleIdentifier: selectedApplication.bundleIdentifier,
                 desktopNumber: desktopNumber
             )
-            let appBindings = try assignmentPlanner.appBindings(
-                for: assignment,
+            // Surface the specific bad Desktop number for the just-chosen app
+            // before touching the source of truth.
+            _ = try assignmentPlanner.appBindings(for: assignment, on: desktopSnapshot)
+
+            // Update and persist the JSON source of truth, then re-derive both
+            // macOS representations from the full saved config so every managed
+            // Assignment is applied and unmanaged bindings are left untouched.
+            configuration.upsert(
+                ManagedApplication(
+                    bundleIdentifier: selectedApplication.bundleIdentifier,
+                    displayName: selectedApplication.displayName,
+                    desktopNumber: desktopNumber
+                )
+            )
+            try configurationStore.save(configuration)
+
+            let appBindings = assignmentPlanner.appBindings(
+                for: configuration.assignments,
                 on: desktopSnapshot
             )
             try spacesAdapter.apply(appBindings: appBindings)
