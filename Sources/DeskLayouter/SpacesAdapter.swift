@@ -24,11 +24,36 @@ public protocol SpacesAdapter {
     ) throws
 }
 
-public final class MacOSSpacesAdapter: SpacesAdapter {
-    private let commandRunner = CommandRunner()
-    private let sessionBindingUpdater = SessionBindingUpdater()
+/// Runs an external command, returning its standard output.
+///
+/// Injectable so tests can exercise `MacOSSpacesAdapter` without touching the
+/// real `defaults` store or restarting the Dock.
+public protocol CommandRunning {
+    func run(executable: String, arguments: [String]) throws -> Data
+}
 
-    public init() {}
+/// Updates WindowServer's current-session application bindings through the
+/// dynamically resolved private SkyLight setter.
+///
+/// `preflight()` verifies the private symbols are resolvable *before* Apply
+/// mutates any persistent state, so an unavailable ABI fails closed without
+/// leaving a partial managed update or altering unmanaged bindings.
+public protocol SessionBindingUpdating {
+    func preflight() throws
+    func update(appBindings: [String: String]) throws
+}
+
+public final class MacOSSpacesAdapter: SpacesAdapter {
+    private let commandRunner: CommandRunning
+    private let sessionBindingUpdater: SessionBindingUpdating
+
+    public init(
+        commandRunner: CommandRunning? = nil,
+        sessionBindingUpdater: SessionBindingUpdating? = nil
+    ) {
+        self.commandRunner = commandRunner ?? CommandRunner()
+        self.sessionBindingUpdater = sessionBindingUpdater ?? SessionBindingUpdater()
+    }
 
     public func currentDesktopSnapshot() throws -> DesktopSnapshot {
         let builtInDisplayIdentifier = try builtInDisplayIdentifier()
@@ -89,6 +114,12 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         managedBindings: [String: String],
         managedBundleIdentifiers: Set<String>
     ) throws {
+        // Preflight the private session-binding ABI before touching any
+        // persistent state. If the symbols are unavailable, Apply fails closed
+        // here, leaving both managed and unmanaged persistent bindings untouched
+        // and the Dock un-restarted (issue #8, AC 4).
+        try sessionBindingUpdater.preflight()
+
         // Normalize to the lowercase form macOS/Dock use. Ownership is decided on
         // the same normalized keys the store holds, so managed keys can be
         // deleted without disturbing unmanaged entries.
@@ -175,7 +206,7 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
     }
 }
 
-enum SpacesAdapterError: LocalizedError {
+public enum SpacesAdapterError: LocalizedError, Equatable {
     case builtInDisplayNotFound
     case commandFailed(executable: String, status: Int32, message: String)
     case displayEnumerationFailed
@@ -184,7 +215,7 @@ enum SpacesAdapterError: LocalizedError {
     case storeFormatChanged
     case verificationFailed(bundleIdentifiers: [String])
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .builtInDisplayNotFound:
             "No active built-in display was found."
@@ -210,17 +241,44 @@ private typealias SetSessionBindingsFunction = @convention(c) (
     CFDictionary
 ) -> Void
 
-private struct SessionBindingUpdater {
+/// Resolves the private SkyLight session-binding symbols and applies the
+/// current-session update. Resolution happens in `preflight()` so callers can
+/// verify availability before mutating persistent state.
+private final class SessionBindingUpdater: SessionBindingUpdating {
+    private struct Resolved {
+        let mainConnection: MainConnectionFunction
+        let setSessionBindings: SetSessionBindingsFunction
+    }
+
+    private var resolved: Resolved?
+
+    // On macOS 26, app-bindings persists Assignments but does not update the
+    // WindowServer session. Dock's Assign To action calls this private setter.
+    func preflight() throws {
+        _ = try resolve()
+    }
+
     func update(appBindings: [String: String]) throws {
-        // On macOS 26, app-bindings persists Assignments but does not update the
-        // WindowServer session. Dock's Assign To action calls this private setter.
+        let resolved = try resolve()
+        resolved.setSessionBindings(
+            resolved.mainConnection(),
+            appBindings as CFDictionary
+        )
+    }
+
+    private func resolve() throws -> Resolved {
+        if let resolved {
+            return resolved
+        }
+
+        // The handle is intentionally left open for the adapter's lifetime: the
+        // resolved function pointers must stay valid for a later update().
         guard let skyLight = dlopen(
             "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
             RTLD_NOW
         ) else {
             throw SpacesAdapterError.sessionBindingAPIUnavailable
         }
-        defer { dlclose(skyLight) }
 
         guard
             let mainConnectionSymbol = dlsym(skyLight, "SLSMainConnectionID")
@@ -233,22 +291,26 @@ private struct SessionBindingUpdater {
                 "CGSSessionSetCurrentSessionWorkspaceApplicationBindings"
             )
         else {
+            dlclose(skyLight)
             throw SpacesAdapterError.sessionBindingAPIUnavailable
         }
 
-        let mainConnection = unsafeBitCast(
-            mainConnectionSymbol,
-            to: MainConnectionFunction.self
+        let resolved = Resolved(
+            mainConnection: unsafeBitCast(
+                mainConnectionSymbol,
+                to: MainConnectionFunction.self
+            ),
+            setSessionBindings: unsafeBitCast(
+                setterSymbol,
+                to: SetSessionBindingsFunction.self
+            )
         )
-        let setSessionBindings = unsafeBitCast(
-            setterSymbol,
-            to: SetSessionBindingsFunction.self
-        )
-        setSessionBindings(mainConnection(), appBindings as CFDictionary)
+        self.resolved = resolved
+        return resolved
     }
 }
 
-private struct CommandRunner {
+private struct CommandRunner: CommandRunning {
     func run(executable: String, arguments: [String]) throws -> Data {
         let process = Process()
         let standardOutput = Pipe()

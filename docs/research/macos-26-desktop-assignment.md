@@ -25,6 +25,36 @@ No continuously running window-moving agent is required after either successful 
 
 These findings prompted the amendment of [ADR-0001](../adr/0001-declarative-desktop-assignment.md). The declarative design now persists `app-bindings` and performs the private current-session update while retaining the ticket's Dock restart.
 
+## Session-boundary rehydration (logout/login and reboot)
+
+Tested build for this section: macOS 26.5.2 (build 25F84), recorded from `sw_vers` on 2026-07-19.
+
+Issue #3 established quit/relaunch placement within the current login session. It did **not** establish whether macOS reconstructs the live WindowServer current-session binding table from the persisted `com.apple.spaces` `app-bindings` after a login-session boundary (logout/login or reboot) when Desk Layouter is not running. That question is what determines whether "configure once, macOS enforces at login" holds, or whether a re-Apply is required after each boundary.
+
+Because a process cannot span the boundary, the check is a two-phase harness, `Scripts/verify-session-boundary.sh`, with all state staged in a reboot-surviving directory under `~/Library/Application Support/DeskLayouter/session-boundary-test/` (never `/tmp` or `$TMPDIR`, which a reboot clears):
+
+- `arm` — snapshot `com.apple.spaces` (including a pre-seeded unmanaged binding to prove preservation), build a disposable probe app into the persistent dir, record the macOS build, and Apply an Assignment for the probe to a non-active built-in-display Desktop through the production adapter. Prints human instructions; never logs out or reboots.
+- `verify` — after the human logs out/reboots and switches to a different Desktop, launch the fully-quit probe without Desk Layouter running and assert its new window actually belongs to the assigned Desktop (managed space ID re-resolved from the stable Desktop UUID). Read-back of the persisted binding is necessary but not treated as sufficient.
+- `restore` — transactional, idempotent cleanup of app-bindings, live session bindings, active Desktop, probe, and state dir; also runs at the end of `verify`.
+
+Procedure to record a result:
+
+```sh
+Scripts/verify-session-boundary.sh arm
+# log out and back in (or reboot), then from a DIFFERENT Desktop:
+Scripts/verify-session-boundary.sh verify
+```
+
+Observed results:
+
+| Boundary | macOS build | Result | Notes |
+| --- | --- | --- | --- |
+| In-session `arm → restore` round-trip | 26.5.2 (25F84) | Verified | `app-bindings` returned exactly to its prior state; unmanaged binding preserved through Apply; state dir cleaned. Mechanics of the harness are sound. |
+| Logout / login rehydration | 26.5.2 (25F84) | **Pending human-gated verification** | Run `arm` → logout → `verify`. Fill in the observed managed-space placement here once observed. |
+| Reboot / login rehydration | 26.5.2 (25F84) | **Pending human-gated verification** | Run `arm` → reboot → `verify`. Fill in the observed managed-space placement here once observed. |
+
+No product limitation is asserted for the logout/reboot cases yet, because the outcome has not been observed. If `verify` shows the probe does **not** rehydrate onto its assigned Desktop after a boundary, the resulting limitation (e.g. "re-Apply is required after each login") must be recorded here and in ADR-0001 at that time. Do not infer the outcome from persistent read-back alone.
+
 ## Evidence standard and limits
 
 The findings below distinguish four kinds of evidence:

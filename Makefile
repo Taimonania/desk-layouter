@@ -1,4 +1,5 @@
-.PHONY: build run test test-desktop-placement
+.PHONY: build run test test-desktop-placement \
+	session-boundary-arm session-boundary-verify session-boundary-restore
 
 build:
 	./Scripts/build-app.sh
@@ -11,6 +12,19 @@ test:
 	swift run DeskLayouterConfigStoreTests
 	swift run DeskLayouterPickerTests
 	swift run DeskLayouterReconcilerTests
+	swift run DeskLayouterAdapterFailureTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh
+
+# Two-phase, human-gated session-boundary compatibility harness (issue #8).
+# Run `arm`, then log out / reboot yourself, then `verify` from a different
+# Desktop. `restore` is transactional and idempotent.
+session-boundary-arm:
+	./Scripts/verify-session-boundary.sh arm
+
+session-boundary-verify:
+	./Scripts/verify-session-boundary.sh verify
+
+session-boundary-restore:
+	./Scripts/verify-session-boundary.sh restore
