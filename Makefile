@@ -9,6 +9,7 @@ run: build
 
 test:
 	swift run DeskLayouterPlannerTests
+	swift run DeskLayouterBoardTests
 	swift run DeskLayouterConfigStoreTests
 	swift run DeskLayouterPickerTests
 	swift run DeskLayouterReconcilerTests

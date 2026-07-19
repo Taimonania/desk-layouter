@@ -20,6 +20,7 @@ let package = Package(
             sources: [
                 "SpacesAdapter.swift",
                 "ConfigurationStore.swift",
+                "BoardStateStore.swift",
                 "InstalledApplicationsProvider.swift",
             ]
         ),
@@ -30,6 +31,7 @@ let package = Package(
             exclude: [
                 "SpacesAdapter.swift",
                 "ConfigurationStore.swift",
+                "BoardStateStore.swift",
                 "InstalledApplicationsProvider.swift",
             ]
         ),
@@ -37,6 +39,11 @@ let package = Package(
             name: "DeskLayouterPlannerTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterPlannerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterBoardTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterBoardTests"
         ),
         .executableTarget(
             name: "DeskLayouterConfigStoreTests",

@@ -295,6 +295,104 @@ struct ConfigStoreTestRunner {
             try? FileManager.default.removeItem(at: directory)
         }
 
+        // Board state store, round-trip: saving a board and loading it back from
+        // disk returns an identical board, so the pending-versus-applied state
+        // survives relaunch.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let store = BoardStateStore(
+                fileURL: directory.appendingPathComponent("board-state.json")
+            )
+            var board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+            ]))
+            board.move(bundleIdentifier: "com.example.A", toDesktop: 2)
+
+            var reloaded: BoardState?
+            do {
+                try store.save(board)
+                reloaded = try store.load()
+            } catch {
+                reloaded = nil
+            }
+            check("board state save then load round-trips through the filesystem", reloaded == board, "got \(String(describing: reloaded))")
+            check("a reloaded dirty board is still dirty", reloaded?.isDirty == true)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        // Board state store, missing everything: loading before anything is saved,
+        // with no legacy configuration, yields an empty clean board.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let store = BoardStateStore(
+                fileURL: directory.appendingPathComponent("board-state.json")
+            )
+            let loaded = try? store.load()
+            check("loading a missing board yields an empty board", loaded == BoardState(), "got \(String(describing: loaded))")
+        }
+
+        // Board state store, legacy migration: with no board-state file but a
+        // legacy configuration.json present, the configuration is migrated in as a
+        // clean, already-applied board so nothing is lost or falsely pending.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let legacyURL = directory.appendingPathComponent("configuration.json")
+            let legacyStore = ConfigurationStore(fileURL: legacyURL)
+            let legacyConfiguration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.Legacy", displayName: "Legacy", desktopNumber: 2),
+            ])
+            let store = BoardStateStore(
+                fileURL: directory.appendingPathComponent("board-state.json"),
+                legacyConfigurationStore: legacyStore
+            )
+            var migrated: BoardState?
+            do {
+                try legacyStore.save(legacyConfiguration)
+                migrated = try store.load()
+            } catch {
+                migrated = nil
+            }
+            check(
+                "legacy configuration migrates into the board",
+                migrated?.configuration == legacyConfiguration,
+                "got \(String(describing: migrated?.configuration))"
+            )
+            check("a migrated legacy configuration loads clean", migrated?.isDirty == false)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        // Board state store, precedence: when a board-state file exists it is used
+        // rather than migrating the legacy configuration.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let legacyStore = ConfigurationStore(
+                fileURL: directory.appendingPathComponent("configuration.json")
+            )
+            let store = BoardStateStore(
+                fileURL: directory.appendingPathComponent("board-state.json"),
+                legacyConfigurationStore: legacyStore
+            )
+            let board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.Current", displayName: "Current", desktopNumber: 1),
+            ]))
+            var loaded: BoardState?
+            do {
+                try legacyStore.save(DeskLayouterConfiguration(managedApplications: [
+                    ManagedApplication(bundleIdentifier: "com.example.Legacy", displayName: "Legacy", desktopNumber: 3),
+                ]))
+                try store.save(board)
+                loaded = try store.load()
+            } catch {
+                loaded = nil
+            }
+            check("board-state file takes precedence over legacy migration", loaded == board, "got \(String(describing: loaded))")
+            try? FileManager.default.removeItem(at: directory)
+        }
+
         if failures.isEmpty {
             print("Config store tests passed")
         } else {

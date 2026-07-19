@@ -14,6 +14,11 @@ public protocol InstalledApplicationsProviding {
     /// The installed applications merged with the currently-running set, sorted
     /// and deduplicated for display.
     func applications() -> [InstalledApplication]
+
+    /// The real application icon for a bundle identifier, if the app can be
+    /// located, so the board can show each card with its own icon. Returns `nil`
+    /// when no matching application is installed.
+    func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage?
 }
 
 /// The production provider: enumerates application bundles in `/Applications`
@@ -43,6 +48,16 @@ public struct SystemInstalledApplicationsProvider: InstalledApplicationsProvidin
             installed: scanInstalledApplications(),
             running: runningApplications()
         )
+    }
+
+    /// Resolves the application's on-disk URL through `NSWorkspace` and returns
+    /// the icon macOS shows for it. Apps that cannot be located (for example an
+    /// Assignment kept for an app that was since uninstalled) yield `nil`.
+    public func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
+        guard let url = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        return workspace.icon(forFile: url.path)
     }
 
     /// Enumerates `.app` bundles in the search directories that expose a bundle
