@@ -6,7 +6,22 @@ import Foundation
 
 public protocol SpacesAdapter {
     func currentDesktopSnapshot() throws -> DesktopSnapshot
-    func apply(appBindings: [String: String]) throws
+
+    /// Applies the managed Assignments to both macOS representations.
+    ///
+    /// - Parameters:
+    ///   - managedBindings: the desired bindings for currently-managed
+    ///     Assignments that resolve to an existing Desktop (bundle ID →
+    ///     Desktop UUID), as produced by the planner. Bundle IDs are passed
+    ///     verbatim; the adapter normalizes them.
+    ///   - managedBundleIdentifiers: every bundle identifier the app manages —
+    ///     the ownership set. Owned keys absent from `managedBindings` (removed
+    ///     or skipped Assignments) are deleted from the macOS bindings, while
+    ///     unmanaged entries are preserved untouched.
+    func apply(
+        managedBindings: [String: String],
+        managedBundleIdentifiers: Set<String>
+    ) throws
 }
 
 public final class MacOSSpacesAdapter: SpacesAdapter {
@@ -70,17 +85,41 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         return CFUUIDCreateString(nil, displayUUID) as String
     }
 
-    public func apply(appBindings: [String: String]) throws {
-        let normalizedBindings = Dictionary(
-            appBindings.map { ($0.key.lowercased(), $0.value) },
+    public func apply(
+        managedBindings: [String: String],
+        managedBundleIdentifiers: Set<String>
+    ) throws {
+        // Normalize to the lowercase form macOS/Dock use. Ownership is decided on
+        // the same normalized keys the store holds, so managed keys can be
+        // deleted without disturbing unmanaged entries.
+        let desiredManaged = Dictionary(
+            managedBindings.map { ($0.key.lowercased(), $0.value) },
             uniquingKeysWith: { _, latest in latest }
         )
+        let managedOwnedKeys = Set(managedBundleIdentifiers.map { $0.lowercased() })
 
-        for bundleIdentifier in normalizedBindings.keys.sorted() {
-            guard let desktopUUID = normalizedBindings[bundleIdentifier] else {
+        // Read the existing store and compute the complete post-change
+        // dictionary: unmanaged entries preserved, managed Assignments
+        // added/changed, removed-managed keys deleted (issue #7 / ADR-0001).
+        let existingBindings = try readAppBindings()
+        let completeBindings = PersistentBindingReconciler.completeBindings(
+            existing: existingBindings,
+            desiredManaged: desiredManaged,
+            managedOwnedKeys: managedOwnedKeys
+        )
+
+        // Rewrite the whole dictionary. A plain `-dict-add` can only add or
+        // replace keys, so the existing dictionary is cleared first and then the
+        // complete dictionary is written back — this is what lets a removed
+        // managed key actually disappear from the persistent store.
+        _ = try? commandRunner.run(
+            executable: "/usr/bin/defaults",
+            arguments: ["delete", "com.apple.spaces", "app-bindings"]
+        )
+        for bundleIdentifier in completeBindings.keys.sorted() {
+            guard let desktopUUID = completeBindings[bundleIdentifier] else {
                 continue
             }
-
             _ = try commandRunner.run(
                 executable: "/usr/bin/defaults",
                 arguments: [
@@ -99,18 +138,28 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             arguments: ["Dock"]
         )
 
+        // Persistent read-back verification: the store must now match the
+        // complete dictionary exactly — every managed change present, every
+        // removed-managed key gone, every unmanaged entry intact.
+        let writtenBindings = try readAppBindings()
+        guard writtenBindings == completeBindings else {
+            let allKeys = Set(writtenBindings.keys).union(completeBindings.keys)
+            let mismatched = allKeys
+                .filter { writtenBindings[$0] != completeBindings[$0] }
+                .sorted()
+            throw SpacesAdapterError.verificationFailed(bundleIdentifiers: mismatched)
+        }
+
+        // Live session update with the complete persisted dictionary, so removed
+        // and changed Assignments take effect in the current session too.
+        try sessionBindingUpdater.update(appBindings: writtenBindings)
+    }
+
+    /// The current `app-bindings` dictionary, keeping only its string values.
+    private func readAppBindings() throws -> [String: String] {
         let store = try readStore()
-        let writtenBindings = store["app-bindings"] as? [String: Any] ?? [:]
-        let missingBindings = normalizedBindings.filter { bundleIdentifier, desktopUUID in
-            writtenBindings[bundleIdentifier] as? String != desktopUUID
-        }
-
-        guard missingBindings.isEmpty else {
-            throw SpacesAdapterError.verificationFailed(bundleIdentifiers: missingBindings.keys.sorted())
-        }
-
-        let completeBindings = writtenBindings.compactMapValues { $0 as? String }
-        try sessionBindingUpdater.update(appBindings: completeBindings)
+        let bindings = store["app-bindings"] as? [String: Any] ?? [:]
+        return bindings.compactMapValues { $0 as? String }
     }
 
     private func readStore() throws -> [String: Any] {

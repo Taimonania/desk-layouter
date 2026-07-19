@@ -37,8 +37,39 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
 public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
     public var managedApplications: [ManagedApplication]
 
-    public init(managedApplications: [ManagedApplication] = []) {
+    /// Bundle identifiers of applications the user removed whose macOS bindings
+    /// have not yet been deleted. Once an app is dropped from
+    /// ``managedApplications`` there is nothing left to tell the adapter the key
+    /// was ever ours, so a removal is remembered here until the next Apply
+    /// deletes its owned key (issue #7) and clears the record. It is persisted so
+    /// a removal survives quitting the app before Apply.
+    public private(set) var pendingRemovals: [String]
+
+    public init(
+        managedApplications: [ManagedApplication] = [],
+        pendingRemovals: [String] = []
+    ) {
         self.managedApplications = managedApplications
+        self.pendingRemovals = pendingRemovals
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case managedApplications
+        case pendingRemovals
+    }
+
+    // Tolerant decoding so configurations written before pending removals
+    // existed still load (the key simply defaults to empty).
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        managedApplications = try container.decode(
+            [ManagedApplication].self,
+            forKey: .managedApplications
+        )
+        pendingRemovals = try container.decodeIfPresent(
+            [String].self,
+            forKey: .pendingRemovals
+        ) ?? []
     }
 
     /// The managed Assignments, in the order they were added, ready to be
@@ -47,10 +78,25 @@ public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
         managedApplications.map(\.assignment)
     }
 
+    /// The managed application with the given bundle identifier, if any.
+    public func managedApplication(for bundleIdentifier: String) -> ManagedApplication? {
+        managedApplications.first { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    /// Every bundle identifier whose macOS key the app owns on the next Apply:
+    /// the currently managed apps plus the apps pending removal. Handing this to
+    /// the adapter lets removed apps' keys be deleted while unmanaged system
+    /// entries are preserved.
+    public var ownedBundleIdentifiers: Set<String> {
+        Set(managedApplications.map(\.bundleIdentifier)).union(pendingRemovals)
+    }
+
     /// Adds a managed application, or updates the existing one with the same
     /// bundle identifier. This keeps each managed app assigned to exactly one
-    /// Desktop, matching how macOS itself models Assignments.
+    /// Desktop, matching how macOS itself models Assignments. Re-adding an app
+    /// that was pending removal cancels the removal.
     public mutating func upsert(_ application: ManagedApplication) {
+        pendingRemovals.removeAll { $0 == application.bundleIdentifier }
         if let index = managedApplications.firstIndex(
             where: { $0.bundleIdentifier == application.bundleIdentifier }
         ) {
@@ -58,6 +104,23 @@ public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
         } else {
             managedApplications.append(application)
         }
+    }
+
+    /// Removes the managed application with the given bundle identifier, if
+    /// present, and records it as pending removal so the next Apply deletes only
+    /// its owned key from the macOS bindings (issue #7).
+    public mutating func remove(bundleIdentifier: String) {
+        let wasManaged = managedApplications.contains { $0.bundleIdentifier == bundleIdentifier }
+        managedApplications.removeAll { $0.bundleIdentifier == bundleIdentifier }
+        if wasManaged, !pendingRemovals.contains(bundleIdentifier) {
+            pendingRemovals.append(bundleIdentifier)
+        }
+    }
+
+    /// Clears the pending removals after a successful Apply has deleted their
+    /// keys, so they are not deleted again on subsequent Applies.
+    public mutating func clearPendingRemovals() {
+        pendingRemovals = []
     }
 }
 

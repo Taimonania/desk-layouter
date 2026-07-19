@@ -102,6 +102,121 @@ struct ConfigStoreTestRunner {
             )
         }
 
+        // Remove: removing a managed app by bundle identifier drops exactly that
+        // app, leaving the others in place so only its owned key is deleted on
+        // the next Apply.
+        do {
+            var configuration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+            ])
+            configuration.remove(bundleIdentifier: "com.example.A")
+            check(
+                "remove drops only the named managed app",
+                configuration.managedApplications == [
+                    ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                ],
+                "got \(configuration.managedApplications)"
+            )
+        }
+
+        // Remove: removing an unknown bundle identifier is a harmless no-op and
+        // records no pending removal.
+        do {
+            var configuration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+            ])
+            configuration.remove(bundleIdentifier: "com.example.Unknown")
+            check(
+                "removing an unknown bundle identifier changes nothing",
+                configuration.managedApplications == [
+                    ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ] && configuration.pendingRemovals.isEmpty,
+                "got \(configuration.managedApplications), pending \(configuration.pendingRemovals)"
+            )
+        }
+
+        // Ownership across a removal: a removed app is remembered as pending so it
+        // stays in the owned set (managed ∪ pending). This is what lets Apply
+        // delete a removed app's key even though it is no longer managed.
+        do {
+            var configuration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+            ])
+            configuration.remove(bundleIdentifier: "com.example.A")
+            check(
+                "a removed app is recorded as pending removal",
+                configuration.pendingRemovals == ["com.example.A"],
+                "got \(configuration.pendingRemovals)"
+            )
+            check(
+                "owned identifiers include managed apps and pending removals",
+                configuration.ownedBundleIdentifiers == ["com.example.A", "com.example.B"],
+                "got \(configuration.ownedBundleIdentifiers)"
+            )
+        }
+
+        // Re-adding an app that was pending removal cancels the removal, so its
+        // key is not deleted on the next Apply.
+        do {
+            var configuration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+            ])
+            configuration.remove(bundleIdentifier: "com.example.A")
+            configuration.upsert(
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 3)
+            )
+            check(
+                "re-adding a pending-removal app cancels the removal",
+                configuration.pendingRemovals.isEmpty
+                    && configuration.ownedBundleIdentifiers == ["com.example.A"],
+                "pending \(configuration.pendingRemovals), owned \(configuration.ownedBundleIdentifiers)"
+            )
+        }
+
+        // Clearing pending removals after a successful Apply stops the keys being
+        // deleted again.
+        do {
+            var configuration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+            ])
+            configuration.remove(bundleIdentifier: "com.example.A")
+            configuration.clearPendingRemovals()
+            check(
+                "clearing pending removals empties the owned set once applied",
+                configuration.pendingRemovals.isEmpty
+                    && configuration.ownedBundleIdentifiers.isEmpty,
+                "pending \(configuration.pendingRemovals), owned \(configuration.ownedBundleIdentifiers)"
+            )
+        }
+
+        // Pending removals persist across encode/decode, so a removal survives
+        // quitting the app before Apply. Older files without the key still load.
+        do {
+            var configuration = DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+            ])
+            configuration.remove(bundleIdentifier: "com.example.A")
+            let decoded = try? ConfigurationSerialization.decode(
+                from: ConfigurationSerialization.encode(configuration)
+            )
+            check(
+                "pending removals round-trip through serialization",
+                decoded == configuration && decoded?.pendingRemovals == ["com.example.A"],
+                "got \(String(describing: decoded))"
+            )
+
+            let legacyJSON = Data(#"{"managedApplications":[]}"#.utf8)
+            let legacy = try? ConfigurationSerialization.decode(from: legacyJSON)
+            check(
+                "a configuration without pendingRemovals decodes with none",
+                legacy == DeskLayouterConfiguration(),
+                "got \(String(describing: legacy))"
+            )
+        }
+
         // File store, missing file: loading before anything is saved yields an
         // empty configuration rather than an error. The store never seeds itself
         // from the macOS Spaces store.

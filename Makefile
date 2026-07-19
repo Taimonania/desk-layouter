@@ -10,6 +10,7 @@ test:
 	swift run DeskLayouterPlannerTests
 	swift run DeskLayouterConfigStoreTests
 	swift run DeskLayouterPickerTests
+	swift run DeskLayouterReconcilerTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh
