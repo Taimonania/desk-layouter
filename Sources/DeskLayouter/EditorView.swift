@@ -112,6 +112,10 @@ struct EditorView: View {
 
     private func appCard(_ card: BoardCard) -> some View {
         HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .imageScale(.small)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             icon(for: card)
             Text(card.displayName)
                 .lineLimit(1)
@@ -125,32 +129,39 @@ struct EditorView: View {
         .onDrag {
             NSItemProvider(object: card.bundleIdentifier as NSString)
         }
+        .contextMenu {
+            moveButtons(for: card)
+        }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(card.displayName), Desktop \(card.desktopNumber)")
+        .accessibilityLabel("\(card.displayName), Desktop \(card.desktopNumber). Draggable")
+        .accessibilityActions {
+            moveButtons(for: card)
+        }
+    }
+
+    /// A pointer-free move path that mirrors the drag-and-drop affordance, shared by
+    /// the card's context menu and its accessibility actions so the card can be moved
+    /// between Desktops from the keyboard or assistive technology. The current Desktop
+    /// is skipped since moving there is a no-op.
+    @ViewBuilder
+    private func moveButtons(for card: BoardCard) -> some View {
+        ForEach(desktopNumbers, id: \.self) { number in
+            if number != card.desktopNumber {
+                Button("Move to Desktop \(number)") {
+                    model.move(bundleIdentifier: card.bundleIdentifier, toDesktop: number)
+                }
+            }
+        }
+    }
+
+    /// The Desktops the user can target, clamped to at least one so the UI never
+    /// presents an empty range while the live Desktop count is still resolving.
+    private var desktopNumbers: ClosedRange<Int> {
+        1...max(model.desktopCount, 1)
     }
 
     private func cardControls(_ card: BoardCard) -> some View {
         HStack(spacing: 2) {
-            Button {
-                model.moveCard(bundleIdentifier: card.bundleIdentifier, by: -1)
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.borderless)
-            .disabled(card.desktopNumber <= 1)
-            .help("Move to the previous Desktop")
-            .accessibilityLabel("Move \(card.displayName) to the previous Desktop")
-
-            Button {
-                model.moveCard(bundleIdentifier: card.bundleIdentifier, by: 1)
-            } label: {
-                Image(systemName: "chevron.right")
-            }
-            .buttonStyle(.borderless)
-            .disabled(card.desktopNumber >= model.desktopCount)
-            .help("Move to the next Desktop")
-            .accessibilityLabel("Move \(card.displayName) to the next Desktop")
-
             Button(role: .destructive) {
                 model.removeAssignment(bundleIdentifier: card.bundleIdentifier)
             } label: {
@@ -245,7 +256,7 @@ struct EditorView: View {
     /// so the user can never add an Assignment to a Desktop that isn't real.
     private var destinationPicker: some View {
         Picker("Destination Desktop", selection: $model.newAssignmentDesktopNumber) {
-            ForEach(1...max(model.desktopCount, 1), id: \.self) { number in
+            ForEach(desktopNumbers, id: \.self) { number in
                 Text("Desktop \(number)").tag(number)
             }
         }
