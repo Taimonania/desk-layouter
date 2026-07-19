@@ -11,9 +11,16 @@ let package = Package(
         .executable(name: "DeskLayouter", targets: ["DeskLayouter"]),
     ],
     targets: [
+        .target(name: "DeskLayouterCore"),
         .executableTarget(
             name: "DeskLayouter",
+            dependencies: ["DeskLayouterCore"],
             path: "Sources/DeskLayouter"
+        ),
+        .executableTarget(
+            name: "DeskLayouterPlannerTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterPlannerTests"
         ),
     ]
 )

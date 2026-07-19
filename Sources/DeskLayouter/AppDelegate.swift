@@ -6,6 +6,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorWindow: NSWindow?
     private var statusItem: NSStatusItem?
+    private let editorModel = EditorModel()
 
     static func main() {
         let application = NSApplication.shared
@@ -56,7 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "Desk Layouter"
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: EmptyView())
+        window.contentView = NSHostingView(rootView: EditorView(model: editorModel))
+        window.setContentSize(NSSize(width: 720, height: 480))
         return window
     }
 }
