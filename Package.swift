@@ -1,0 +1,67 @@
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let package = Package(
+    name: "DeskLayouter",
+    platforms: [
+        .macOS(.v13),
+    ],
+    products: [
+        .executable(name: "DeskLayouter", targets: ["DeskLayouter"]),
+    ],
+    targets: [
+        .target(name: "DeskLayouterCore"),
+        .target(
+            name: "DeskLayouterMacOS",
+            dependencies: ["DeskLayouterCore"],
+            path: "Sources/DeskLayouter",
+            exclude: ["AppDelegate.swift", "EditorModel.swift", "EditorView.swift"],
+            sources: [
+                "SpacesAdapter.swift",
+                "ConfigurationStore.swift",
+                "InstalledApplicationsProvider.swift",
+            ]
+        ),
+        .executableTarget(
+            name: "DeskLayouter",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Sources/DeskLayouter",
+            exclude: [
+                "SpacesAdapter.swift",
+                "ConfigurationStore.swift",
+                "InstalledApplicationsProvider.swift",
+            ]
+        ),
+        .executableTarget(
+            name: "DeskLayouterPlannerTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterPlannerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterConfigStoreTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterConfigStoreTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterPickerTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterPickerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterReconcilerTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterReconcilerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterAdapterFailureTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterAdapterFailureTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterDesktopPlacementTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterDesktopPlacementTests"
+        ),
+    ]
+)
