@@ -11,8 +11,8 @@ set -eu
 #
 # Subcommands:
 #   arm      Snapshot state, build a disposable probe app into the persistent
-#            dir, and Apply an Assignment for it to a non-active built-in-display
-#            Desktop THROUGH THE PRODUCTION ADAPTER. Records the macOS build and
+#            dir, and Apply an Assignment for it to a non-active Desktop on the
+#            active display THROUGH THE PRODUCTION ADAPTER. Records the macOS build and
 #            prints the human instructions. NEVER logs out or reboots.
 #   verify   Launch the probe from the current (different) Desktop WITHOUT Desk
 #            Layouter running and assert ACTUAL window placement on the assigned
@@ -63,7 +63,7 @@ current_store_json() {
     /bin/rm -f "$tmp_plist" "$tmp_json"
 }
 
-# Managed space IDs for the built-in display in the CURRENT store. Recomputed on
+# Managed space IDs for the active display in the CURRENT store. Recomputed on
 # demand because macOS may re-mint these integers across a session boundary; the
 # Desktop UUID is the stable identifier.
 current_desktop_managed_space_ids() {
@@ -106,7 +106,7 @@ restore_bindings_from_original() {
 goto_space() {
     # Best-effort navigation to a target managed space ID using the same
     # arrow-key approach as verify-desktop-placement.sh. Skips gracefully if the
-    # target ID is not present on the current built-in display (e.g. IDs re-minted
+    # target ID is not present on the current active display (e.g. IDs re-minted
     # after a reboot), so restore stays safe.
     local target="$1" display="$2"
     [[ -n "$target" ]] || return 0
@@ -158,7 +158,7 @@ do_restore() {
 
     local display="" active_id="" active_uuid=""
     if [[ -f "$metadata" ]]; then
-        display="$(/usr/bin/jq -r '.built_in_display_identifier // ""' "$metadata")"
+        display="$(/usr/bin/jq -r '.active_display_identifier // ""' "$metadata")"
         active_id="$(/usr/bin/jq -r '.original_active_space_id // ""' "$metadata")"
         active_uuid="$(/usr/bin/jq -r '.original_active_uuid // ""' "$metadata")"
     fi
@@ -249,10 +249,10 @@ do_arm() {
     key="${bundle_id:l}"
     make_probe_app "$bundle_id"
 
-    # 4. Resolve the built-in display and a non-active target Desktop by UUID.
+    # 4. Resolve the active display and a non-active target Desktop by UUID.
     local original_active_space_id display original_active_uuid
     original_active_space_id="$("$probe_executable" --active-space)"
-    display="$("$probe_executable" --built-in-display-identifier)"
+    display="$("$probe_executable" --active-display-identifier)"
     # Record the active Desktop by its STABLE UUID as well, so restore can return
     # there even after a boundary re-mints the integer managed space IDs.
     original_active_uuid="$(/usr/bin/jq -r \
@@ -278,7 +278,7 @@ do_arm() {
     ' "$store_snapshot_json")"
 
     if [[ -z "$target" ]]; then
-        print -u2 "SKIP: this test needs at least one non-current Desktop (with a UUID) on the built-in display."
+        print -u2 "SKIP: this test needs at least one non-current Desktop (with a UUID) on the active display."
         # The EXIT trap performs the rollback and cleanup.
         exit 2
     fi
@@ -311,7 +311,7 @@ do_arm() {
         --argjson original_active_space_id "$original_active_space_id" \
         --arg original_active_uuid "$original_active_uuid" \
         --argjson original_bindings_present "$original_present" \
-        --arg built_in_display_identifier "$display" \
+        --arg active_display_identifier "$display" \
         '{
             bundle_id: $bundle_id,
             key: $key,
@@ -322,7 +322,7 @@ do_arm() {
             original_active_space_id: $original_active_space_id,
             original_active_uuid: $original_active_uuid,
             original_bindings_present: $original_bindings_present,
-            built_in_display_identifier: $built_in_display_identifier
+            active_display_identifier: $active_display_identifier
         }' > "$metadata"
 
     # arm succeeded: keep the armed state for the human-gated boundary.
@@ -360,7 +360,7 @@ do_verify() {
     target_uuid="$(/usr/bin/jq -r '.target_uuid' "$metadata")"
     unmanaged_key="$(/usr/bin/jq -r '.unmanaged_key' "$metadata")"
     unmanaged_uuid="$(/usr/bin/jq -r '.unmanaged_uuid' "$metadata")"
-    display="$(/usr/bin/jq -r '.built_in_display_identifier' "$metadata")"
+    display="$(/usr/bin/jq -r '.active_display_identifier' "$metadata")"
 
     print "recorded macOS build:"
     /bin/cat "$sw_vers_file"
@@ -390,7 +390,7 @@ do_verify() {
     local current_target_id
     current_target_id="$(managed_space_id_for_uuid "$display" "$target_uuid")"
     if [[ -z "$current_target_id" ]]; then
-        print -u2 "FAIL: the assigned Desktop (UUID $target_uuid) no longer exists on the built-in display"
+        print -u2 "FAIL: the assigned Desktop (UUID $target_uuid) no longer exists on the active display"
         do_restore
         exit 1
     fi

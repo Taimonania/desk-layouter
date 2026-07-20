@@ -93,7 +93,7 @@ struct EditorView: View {
     @ViewBuilder
     private func board(availableWidth: CGFloat) -> some View {
         if model.columns.isEmpty {
-            Text("No Desktops were found on the built-in display.")
+            Text("No Desktops were found on the active display.")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 160)
         } else {
