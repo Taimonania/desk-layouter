@@ -77,6 +77,7 @@ struct LayoutEditorView: View {
                 title: "Columns (left → right)",
                 division: divisionBinding({ $0.horizontalDivision }, { $0.setHorizontalDivision($1) }),
                 cellCount: draft.horizontalDivision.cellCount,
+                isFull: draft.isHorizontalFull,
                 startLabel: "First column",
                 endLabel: "Last column",
                 start: intBinding({ $0.columnSpan.start }, { $0.setColumnStart($1) }),
@@ -87,6 +88,7 @@ struct LayoutEditorView: View {
                 title: "Rows (top → bottom)",
                 division: divisionBinding({ $0.verticalDivision }, { $0.setVerticalDivision($1) }),
                 cellCount: draft.verticalDivision.cellCount,
+                isFull: draft.isVerticalFull,
                 startLabel: "First row",
                 endLabel: "Last row",
                 start: intBinding({ $0.rowSpan.start }, { $0.setRowStart($1) }),
@@ -99,12 +101,15 @@ struct LayoutEditorView: View {
 
     /// One axis block: its division segmented control plus start/end cell pickers.
     /// `topMarker` names the index that should read "(top)" so rows make their
-    /// row-0-at-top orientation explicit.
+    /// row-0-at-top orientation explicit. A Full axis (`isFull`) covers its whole
+    /// extent in one cell, so it hides the first/last pickers — there is nothing
+    /// to choose.
     @ViewBuilder
     private func axisControls(
         title: String,
         division: Binding<Division>,
         cellCount: Int,
+        isFull: Bool,
         startLabel: String,
         endLabel: String,
         start: Binding<Int>,
@@ -122,9 +127,11 @@ struct LayoutEditorView: View {
             .labelsHidden()
             .pickerStyle(.segmented)
 
-            HStack(spacing: 10) {
-                cellPicker(label: startLabel, selection: start, cellCount: cellCount, topMarker: topMarker)
-                cellPicker(label: endLabel, selection: end, cellCount: cellCount, topMarker: topMarker)
+            if !isFull {
+                HStack(spacing: 10) {
+                    cellPicker(label: startLabel, selection: start, cellCount: cellCount, topMarker: topMarker)
+                    cellPicker(label: endLabel, selection: end, cellCount: cellCount, topMarker: topMarker)
+                }
             }
         }
     }
@@ -201,6 +208,7 @@ struct LayoutEditorView: View {
 
     private static func divisionName(_ division: Division) -> String {
         switch division {
+        case .full: "Full"
         case .halves: "Halves"
         case .thirds: "Thirds"
         case .fourths: "Fourths"

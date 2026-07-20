@@ -130,6 +130,61 @@ struct LayoutDraftTestRunner {
                   draft.isCellOccupied(column: 0, row: 2) == draft.layout.occupies(column: 0, row: 2))
         }
 
+        // Setting an axis to Full collapses it to its single cell, and the draft
+        // reports the axis as full so the editor can hide its first/last controls.
+        do {
+            var draft = LayoutDraft(
+                Layout(
+                    horizontalDivision: .fourths,
+                    verticalDivision: .halves,
+                    columnSpan: LayoutSpan(start: 1, end: 3),
+                    rowSpan: .single(1)
+                )
+            )
+            draft.setHorizontalDivision(.full)
+            check("a Full axis collapses to its single cell",
+                  draft.columnSpan == .single(0), "got \(draft.columnSpan)")
+            check("a Full axis builds a valid Layout", draft.layout.isValid)
+            check("the draft reports the horizontal axis as full", draft.isHorizontalFull)
+            check("the vertical axis is not full", draft.isVerticalFull == false)
+        }
+
+        // Switching a Full axis back to a divided one starts at the leftmost
+        // column / top row (index 0), regardless of where the span sat before.
+        do {
+            var draft = LayoutDraft(
+                Layout(
+                    horizontalDivision: .fourths,
+                    verticalDivision: .halves,
+                    columnSpan: .single(3),
+                    rowSpan: .single(1)
+                )
+            )
+            draft.setHorizontalDivision(.full)
+            draft.setHorizontalDivision(.thirds)
+            check("switching Full → Thirds selects the leftmost column",
+                  draft.columnSpan == .single(0), "got \(draft.columnSpan)")
+
+            draft.setVerticalDivision(.full)
+            draft.setVerticalDivision(.fourths)
+            check("switching Full → Fourths selects the top row",
+                  draft.rowSpan == .single(0), "got \(draft.rowSpan)")
+        }
+
+        // A Layout seeded from a Full-axis Layout round-trips unchanged.
+        do {
+            let layout = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .thirds,
+                columnSpan: .single(0),
+                rowSpan: .single(2)
+            )
+            let draft = LayoutDraft(layout)
+            check("seeding a Full-axis Layout round-trips it", draft.layout == layout,
+                  "got \(draft.layout)")
+            check("seeded Full axis reports as full", draft.isHorizontalFull)
+        }
+
         if failures.isEmpty {
             print("Layout draft tests passed")
         } else {
