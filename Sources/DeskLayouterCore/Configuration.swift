@@ -14,10 +14,26 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
     public let displayName: String
     public var desktopNumber: Int
 
-    public init(bundleIdentifier: String, displayName: String, desktopNumber: Int) {
+    /// Where this application's window sits on its Desktop's screen, or `nil`
+    /// when the app is not arranged. A missing Layout is the norm: most managed
+    /// apps only carry an Assignment (which Desktop), not a Layout (where on it).
+    ///
+    /// The synthesized `Codable` conformance decodes an optional with
+    /// `decodeIfPresent`, so configurations written before Layout existed still
+    /// load with `layout == nil` — the same tolerance the ``pendingRemovals``
+    /// pattern gives ``DeskLayouterConfiguration``.
+    public var layout: Layout?
+
+    public init(
+        bundleIdentifier: String,
+        displayName: String,
+        desktopNumber: Int,
+        layout: Layout? = nil
+    ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
         self.desktopNumber = desktopNumber
+        self.layout = layout
     }
 
     /// The managed application's Assignment, as consumed by the planner.
