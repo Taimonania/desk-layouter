@@ -185,6 +185,178 @@ struct LayoutDraftTestRunner {
             check("seeded Full axis reports as full", draft.isHorizontalFull)
         }
 
+        // Direct selection — clicking a single cell selects exactly that cell on
+        // both axes, replacing whatever span was there before.
+        do {
+            var draft = LayoutDraft(
+                Layout(
+                    horizontalDivision: .thirds,
+                    verticalDivision: .thirds,
+                    columnSpan: LayoutSpan(start: 0, end: 2),
+                    rowSpan: LayoutSpan(start: 0, end: 2)
+                )
+            )
+            draft.selectCell(column: 1, row: 2)
+            check("clicking a cell selects that single column",
+                  draft.columnSpan == .single(1), "got \(draft.columnSpan)")
+            check("clicking a cell selects that single row",
+                  draft.rowSpan == .single(2), "got \(draft.rowSpan)")
+            check("single-cell selection builds a valid Layout", draft.layout.isValid)
+            check("only the clicked cell reads occupied",
+                  draft.isCellOccupied(column: 1, row: 2)
+                      && !draft.isCellOccupied(column: 0, row: 0)
+                      && !draft.isCellOccupied(column: 2, row: 2))
+        }
+
+        // Direct selection — a forward drag (anchor before cursor) selects the
+        // inclusive rectangle between the two cells.
+        do {
+            var draft = LayoutDraft(
+                Layout(
+                    horizontalDivision: .fourths,
+                    verticalDivision: .thirds,
+                    columnSpan: .single(0),
+                    rowSpan: .single(0)
+                )
+            )
+            draft.selectCells(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 2)
+            check("forward drag selects the inclusive column span",
+                  draft.columnSpan == LayoutSpan(start: 1, end: 3), "got \(draft.columnSpan)")
+            check("forward drag selects the inclusive row span",
+                  draft.rowSpan == LayoutSpan(start: 0, end: 2), "got \(draft.rowSpan)")
+            check("forward drag builds a valid Layout", draft.layout.isValid)
+        }
+
+        // Direct selection — a reverse drag (cursor before anchor) selects the
+        // same rectangle as the equivalent forward drag, regardless of direction.
+        do {
+            var forward = LayoutDraft(
+                Layout(horizontalDivision: .fourths, verticalDivision: .thirds,
+                       columnSpan: .single(0), rowSpan: .single(0))
+            )
+            var reverse = forward
+            forward.selectCells(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 2)
+            reverse.selectCells(fromColumn: 3, fromRow: 2, toColumn: 1, toRow: 0)
+            check("reverse drag yields the same column span as forward",
+                  forward.columnSpan == reverse.columnSpan,
+                  "forward \(forward.columnSpan) reverse \(reverse.columnSpan)")
+            check("reverse drag yields the same row span as forward",
+                  forward.rowSpan == reverse.rowSpan,
+                  "forward \(forward.rowSpan) reverse \(reverse.rowSpan)")
+        }
+
+        // Direct selection is always one continuous, valid rectangle even when the
+        // drag endpoints fall outside the grid: the endpoints clamp into range.
+        do {
+            var draft = LayoutDraft(
+                Layout(horizontalDivision: .halves, verticalDivision: .halves,
+                       columnSpan: .single(0), rowSpan: .single(0))
+            )
+            draft.selectCells(fromColumn: -5, fromRow: 9, toColumn: 9, toRow: -5)
+            check("out-of-range drag endpoints clamp to a valid rectangle", draft.layout.isValid,
+                  "got \(draft.layout)")
+            check("clamped drag fills the whole halves×halves grid",
+                  draft.columnSpan == LayoutSpan(start: 0, end: 1)
+                      && draft.rowSpan == LayoutSpan(start: 0, end: 1),
+                  "cols \(draft.columnSpan) rows \(draft.rowSpan)")
+        }
+
+        // Direct selection on a Full axis stays on that axis's single cell no
+        // matter which cell index the interaction reports.
+        do {
+            var draft = LayoutDraft(
+                Layout(horizontalDivision: .full, verticalDivision: .thirds,
+                       columnSpan: .single(0), rowSpan: .single(0))
+            )
+            draft.selectCells(fromColumn: 2, fromRow: 0, toColumn: 3, toRow: 2)
+            check("a Full axis stays on its single cell under drag",
+                  draft.columnSpan == .single(0), "got \(draft.columnSpan)")
+            check("the divided axis still takes the dragged span",
+                  draft.rowSpan == LayoutSpan(start: 0, end: 2), "got \(draft.rowSpan)")
+            check("Full-axis selection builds a valid Layout", draft.layout.isValid)
+
+            // Both axes Full: any interaction resolves to the one cell.
+            var both = LayoutDraft(
+                Layout(horizontalDivision: .full, verticalDivision: .full,
+                       columnSpan: .single(0), rowSpan: .single(0))
+            )
+            both.selectCell(column: 3, row: 2)
+            check("both-Full selection stays on cell (0,0)",
+                  both.columnSpan == .single(0) && both.rowSpan == .single(0),
+                  "cols \(both.columnSpan) rows \(both.rowSpan)")
+        }
+
+        // Synchronization — after a direct selection the first/last values the
+        // controls read reflect the new span, and editing a control afterwards
+        // still narrows the same span (both input methods drive one state).
+        do {
+            var draft = LayoutDraft(
+                Layout(horizontalDivision: .fourths, verticalDivision: .halves,
+                       columnSpan: .single(0), rowSpan: .single(0))
+            )
+            draft.selectCells(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 1)
+            check("controls read the selection's first/last column",
+                  draft.columnSpan.start == 1 && draft.columnSpan.end == 3)
+            check("controls read the selection's first/last row",
+                  draft.rowSpan.start == 0 && draft.rowSpan.end == 1)
+            draft.setColumnStart(2)
+            check("editing a control after a selection narrows the same span",
+                  draft.columnSpan == LayoutSpan(start: 2, end: 3), "got \(draft.columnSpan)")
+        }
+
+        // Save/Cancel seam — a LayoutDraft is a value type, so the editor's draft
+        // copy can be mutated freely; Cancel simply discards it and the source
+        // Layout is untouched, while Save persists exactly `draft.layout`.
+        do {
+            let saved = Layout(
+                horizontalDivision: .halves, verticalDivision: .halves,
+                columnSpan: .single(0), rowSpan: LayoutSpan(start: 0, end: 1)
+            )
+            var draft = LayoutDraft(saved)
+            draft.selectCells(fromColumn: 1, fromRow: 1, toColumn: 1, toRow: 1)
+            check("mutating the draft does not mutate the source Layout",
+                  saved.columnSpan == .single(0) && saved.rowSpan == LayoutSpan(start: 0, end: 1),
+                  "source changed to \(saved)")
+            check("Save would persist exactly the draft's current selection",
+                  draft.layout == Layout(horizontalDivision: .halves, verticalDivision: .halves,
+                                         columnSpan: .single(1), rowSpan: .single(1)),
+                  "got \(draft.layout)")
+        }
+
+        // Grid metrics — the pure pointer-offset → cell-index mapping the
+        // interactive preview drives. Pitch is cell + gap; a click near a cell's
+        // centre lands on that cell, and offsets before/after the grid clamp to
+        // the first/last cell so a drag past an edge still selects the edge cell.
+        do {
+            let metrics = LayoutGridMetrics(cellSize: 26, spacing: 2) // pitch 28
+            check("offset in the first cell maps to index 0",
+                  metrics.cellIndex(at: 13, cellCount: 4) == 0)
+            check("offset in the third cell maps to index 2",
+                  metrics.cellIndex(at: 2 * 28 + 13, cellCount: 4) == 2,
+                  "got \(metrics.cellIndex(at: 2 * 28 + 13, cellCount: 4))")
+            check("negative offset clamps to the first cell",
+                  metrics.cellIndex(at: -40, cellCount: 4) == 0)
+            check("offset past the grid clamps to the last cell",
+                  metrics.cellIndex(at: 9_999, cellCount: 4) == 3,
+                  "got \(metrics.cellIndex(at: 9_999, cellCount: 4))")
+            check("any offset on a Full axis (cellCount 1) maps to 0",
+                  metrics.cellIndex(at: 500, cellCount: 1) == 0)
+            check("cellPitch is cell size plus spacing", metrics.cellPitch == 28)
+        }
+
+        // Click path — a zero-length drag (start == current cell), the way the
+        // view routes a click, selects exactly that one cell on both axes.
+        do {
+            var draft = LayoutDraft(
+                Layout(horizontalDivision: .thirds, verticalDivision: .thirds,
+                       columnSpan: LayoutSpan(start: 0, end: 2), rowSpan: LayoutSpan(start: 0, end: 2))
+            )
+            draft.selectCells(fromColumn: 2, fromRow: 1, toColumn: 2, toRow: 1)
+            check("a zero-length drag selects the single clicked cell",
+                  draft.columnSpan == .single(2) && draft.rowSpan == .single(1),
+                  "cols \(draft.columnSpan) rows \(draft.rowSpan)")
+        }
+
         if failures.isEmpty {
             print("Layout draft tests passed")
         } else {

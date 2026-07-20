@@ -104,6 +104,27 @@ public struct LayoutDraft: Equatable, Sendable {
         rowSpan = LayoutDraft.spanSettingEnd(end, on: rowSpan, cellCount: verticalDivision.cellCount)
     }
 
+    // MARK: - Direct selection
+
+    /// Selects exactly one cell on both axes — the mini-grid "click a cell"
+    /// gesture. Equivalent to a zero-length drag from the cell to itself, so the
+    /// same clamping and rectangle guarantees apply. On a Full axis the index
+    /// clamps to that axis's single cell.
+    public mutating func selectCell(column: Int, row: Int) {
+        selectCells(fromColumn: column, fromRow: row, toColumn: column, toRow: row)
+    }
+
+    /// Selects the inclusive rectangle of cells spanned by two cells — the
+    /// mini-grid "press one cell and drag to another" gesture. The result is the
+    /// same whichever cell is the anchor and whichever is the cursor (drag
+    /// direction does not matter), it is always one continuous rectangle, and
+    /// each endpoint is clamped into its division, so an interaction that reports
+    /// an out-of-range cell (or lands on a Full axis) still yields a valid Layout.
+    public mutating func selectCells(fromColumn: Int, fromRow: Int, toColumn: Int, toRow: Int) {
+        columnSpan = LayoutDraft.spanBetween(fromColumn, toColumn, cellCount: horizontalDivision.cellCount)
+        rowSpan = LayoutDraft.spanBetween(fromRow, toRow, cellCount: verticalDivision.cellCount)
+    }
+
     // MARK: - Mini-grid mapping
 
     /// Whether the cell at the given 0-based `column` and `row` is one of the
@@ -120,6 +141,15 @@ public struct LayoutDraft: Equatable, Sendable {
         let end = min(max(span.end, 0), maxIndex)
         let start = min(max(span.start, 0), end)
         return LayoutSpan(start: start, end: end)
+    }
+
+    /// The inclusive span covering both `a` and `b` after each is clamped into
+    /// `[0, cellCount - 1]`. Order-independent (min/max), so drag direction does
+    /// not matter; clamping is monotonic so `start <= end` always holds.
+    private static func spanBetween(_ a: Int, _ b: Int, cellCount: Int) -> LayoutSpan {
+        let maxIndex = max(cellCount - 1, 0)
+        func clamp(_ value: Int) -> Int { min(max(value, 0), maxIndex) }
+        return LayoutSpan(start: clamp(min(a, b)), end: clamp(max(a, b)))
     }
 
     private static func spanSettingStart(_ start: Int, on span: LayoutSpan, cellCount: Int) -> LayoutSpan {
