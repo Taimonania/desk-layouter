@@ -5,6 +5,13 @@ import Foundation
 public protocol SpacesAdapter {
     func currentDesktopSnapshot() throws -> DesktopSnapshot
 
+    /// The 1-based number of the Desktop currently active on the sole active
+    /// Display, matching the numbering of ``currentDesktopSnapshot()`` (Desktop 1
+    /// is the first ordered Desktop). Returns `nil` when the active Desktop cannot
+    /// be identified — runtime Arrange (#27) uses this to know which Desktop it is
+    /// enacting so it can arm the others, and treats `nil` as "unknown".
+    func activeDesktopNumber() throws -> Int?
+
     /// Applies the managed Assignments to both macOS representations.
     ///
     /// - Parameters:
@@ -77,6 +84,19 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             displayKey: displayKey
         )
         return DesktopSnapshot(orderedDesktopUUIDs: orderedDesktopUUIDs)
+    }
+
+    public func activeDesktopNumber() throws -> Int? {
+        // Resolve the sole active logical Display exactly as the snapshot does,
+        // then read the live current Space's position in that Display's ordered
+        // Desktops. A topology that is not a single main Display throws here (as
+        // in `currentDesktopSnapshot()`), so Arrange never guesses against an
+        // ambiguous setup.
+        let displayKey = try DisplayResolution.activeDisplayKey(
+            for: displayInventory.activeDisplays()
+        )
+        let store = try readStore()
+        return DisplayResolution.activeDesktopNumber(fromStore: store, displayKey: displayKey)
     }
 
     public func apply(

@@ -81,17 +81,7 @@ public enum DisplayResolution {
         displayKey: String
     ) throws -> [String] {
         guard
-            let configuration = store["SpacesDisplayConfiguration"] as? [String: Any],
-            let managementData = configuration["Management Data"] as? [String: Any],
-            let monitors = managementData["Monitors"] as? [[String: Any]]
-        else {
-            throw SpacesAdapterError.storeFormatChanged
-        }
-
-        guard
-            let displayEntry = monitors.first(where: {
-                $0["Display Identifier"] as? String == displayKey && $0["Spaces"] != nil
-            }),
+            let displayEntry = monitorEntry(fromStore: store, displayKey: displayKey),
             let desktopEntries = displayEntry["Spaces"] as? [[String: Any]]
         else {
             throw SpacesAdapterError.storeFormatChanged
@@ -109,6 +99,52 @@ public enum DisplayResolution {
         }
 
         return orderedDesktopUUIDs
+    }
+
+    /// Resolves the 1-based number of the Desktop currently active on the given
+    /// Display from an exported `com.apple.spaces` store, matching the numbering
+    /// of ``orderedDesktopUUIDs(fromStore:displayKey:)`` (Desktop 1 is the first
+    /// ordered Desktop). Returns `nil` when the current Space cannot be read or is
+    /// not one of the Display's ordered Desktops — Arrange treats an unidentified
+    /// active Desktop as "unknown" rather than guessing.
+    ///
+    /// The store records the live current Space per monitor under
+    /// `"Current Space" → "uuid"`; the number is that uuid's position in the same
+    /// ordered, TileLayoutManager-filtered Desktop list Assignment already uses.
+    public static func activeDesktopNumber(
+        fromStore store: [String: Any],
+        displayKey: String
+    ) -> Int? {
+        guard
+            let displayEntry = monitorEntry(fromStore: store, displayKey: displayKey),
+            let currentSpace = displayEntry["Current Space"] as? [String: Any],
+            let currentUUID = currentSpace["uuid"] as? String,
+            let orderedDesktopUUIDs = try? orderedDesktopUUIDs(fromStore: store, displayKey: displayKey),
+            let index = orderedDesktopUUIDs.firstIndex(of: currentUUID)
+        else {
+            return nil
+        }
+        return index + 1
+    }
+
+    /// The live monitor entry for `displayKey` — the one carrying a `Spaces` array
+    /// (collapsed/historical entries, which lack it, are skipped). Both the ordered
+    /// Desktop list and the current-Desktop lookup start here, so the store-path
+    /// navigation lives in one place.
+    private static func monitorEntry(
+        fromStore store: [String: Any],
+        displayKey: String
+    ) -> [String: Any]? {
+        guard
+            let configuration = store["SpacesDisplayConfiguration"] as? [String: Any],
+            let managementData = configuration["Management Data"] as? [String: Any],
+            let monitors = managementData["Monitors"] as? [[String: Any]]
+        else {
+            return nil
+        }
+        return monitors.first {
+            $0["Display Identifier"] as? String == displayKey && $0["Spaces"] != nil
+        }
     }
 }
 

@@ -460,6 +460,16 @@ struct EditorView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(!model.canApply)
 
+            // Arrange enacts Layouts on live windows. It is separate from Apply
+            // (which writes Assignments) and, unlike Apply, is not gated on pending
+            // changes — setting a Layout never dirties the board (issue #27).
+            Button("Arrange") {
+                model.arrange()
+            }
+            .disabled(!model.canArrange)
+            .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+            .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+
             if model.pendingChangeCount > 0 {
                 Text("^[\(model.pendingChangeCount) unapplied change](inflect: true)")
                     .font(.callout)

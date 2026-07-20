@@ -24,6 +24,7 @@ let package = Package(
                 "BoardStateStore.swift",
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
+                "DesktopArrangePlan.swift",
             ]
         ),
         .executableTarget(
@@ -37,6 +38,7 @@ let package = Package(
                 "BoardStateStore.swift",
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
+                "DesktopArrangePlan.swift",
             ]
         ),
         .executableTarget(
@@ -93,6 +95,11 @@ let package = Package(
             name: "DeskLayouterArrangeTests",
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterArrangeTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterArrangePlanTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterArrangePlanTests"
         ),
     ]
 )

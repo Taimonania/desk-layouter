@@ -2,9 +2,11 @@ import AppKit
 import DeskLayouterCore
 import DeskLayouterMacOS
 
-/// The feedback shown after an Apply attempt, so the view can style success and
-/// failure differently and surface actionable detail.
-enum ApplyFeedback: Equatable {
+/// The feedback shown after an editor action (Apply or Arrange), so the view can
+/// style success and failure differently and surface actionable detail. Named for
+/// the editor rather than Apply because Arrange — a distinct verb (CONTEXT.md) —
+/// reports through the same channel.
+enum EditorFeedback: Equatable {
     case none
     case info(String)
     case success(String)
@@ -38,25 +40,35 @@ final class EditorModel: ObservableObject {
     @Published private(set) var columns: [DesktopColumn] = []
     @Published private(set) var desktopCount = 0
     @Published private(set) var pendingChangeCount = 0
-    @Published private(set) var feedback: ApplyFeedback = .none
+    @Published private(set) var feedback: EditorFeedback = .none
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
     private let boardStateStore: BoardStateStore
     private let applicationsProvider: any InstalledApplicationsProviding
+    private let windowArranger: WindowArranger
     private var board: BoardState
     private var selectedApplication: SelectedApplication?
+
+    // Runtime Arrange state (issue #27, ADR-0003). The pure arming policy lives in
+    // `DesktopArrangePlan`; this model owns only the live NSWorkspace observation
+    // that drives it, torn down as soon as the last armed Desktop is arranged so
+    // the app is never a permanent background observer.
+    private var arrangePlan = DesktopArrangePlan()
+    private var spaceChangeObserver: NSObjectProtocol?
 
     init(
         assignmentPlanner: AssignmentPlanner = AssignmentPlanner(),
         spacesAdapter: any SpacesAdapter = MacOSSpacesAdapter(),
         boardStateStore: BoardStateStore = .default,
-        applicationsProvider: any InstalledApplicationsProviding = SystemInstalledApplicationsProvider()
+        applicationsProvider: any InstalledApplicationsProviding = SystemInstalledApplicationsProvider(),
+        windowArranger: WindowArranger = WindowArranger()
     ) {
         self.assignmentPlanner = assignmentPlanner
         self.spacesAdapter = spacesAdapter
         self.boardStateStore = boardStateStore
         self.applicationsProvider = applicationsProvider
+        self.windowArranger = windowArranger
         // Load the saved board state so the editor reflects both the previously
         // applied Assignments and any edits that were pending at last quit. A
         // missing file loads as an empty board; a read failure falls back to
@@ -87,6 +99,14 @@ final class EditorModel: ObservableObject {
     /// cannot be written until the topology is a single Display again
     /// (issue #18, ACs 5–6).
     var canApply: Bool { board.isDirty && desktopCount > 0 }
+
+    /// True when at least one managed app carries a valid Layout, so Arrange has
+    /// something to enact. Deliberately independent of ``canApply``: setting a
+    /// Layout does not dirty the board, so Arrange must not gate on pending
+    /// Assignment changes (issue #27).
+    var canArrange: Bool {
+        board.configuration.managedApplications.contains(where: \.hasValidLayout)
+    }
 
     /// The status text shown beneath the board.
     var statusMessage: String { feedback.message }
@@ -288,6 +308,130 @@ final class EditorModel: ObservableObject {
             message += " Quit and relaunch these already-running apps before they use their new Desktop: \(runningNames.joined(separator: ", "))."
         }
         return message
+    }
+
+    // MARK: - Arrange
+
+    /// Enacts persisted Layouts at runtime (issue #27, ADR-0003). Arranges the
+    /// currently active Desktop immediately, then arms every OTHER Desktop that
+    /// has a Layout so it is arranged once, the first time it becomes active. Once
+    /// the last armed Desktop has been visited the Space-change observation is torn
+    /// down entirely. Pressing again re-arms from scratch. Windows that resisted
+    /// the move are surfaced in the feedback rather than dropped silently.
+    func arrange() {
+        let applications = board.configuration.managedApplications
+        let activeDesktop = try? spacesAdapter.activeDesktopNumber()
+
+        // Immediately arrange the active Desktop. The engine only reaches the
+        // active Space, so this enacts exactly the Layouts on the Desktop in front
+        // of the user right now.
+        guard let report = runArrange(applications) else { return }
+
+        // Arm the other Desktops that have Layouts. `activeDesktop` is excluded
+        // because it was just arranged above.
+        let desktopsWithLayouts = Set(
+            applications.filter(\.hasValidLayout).map(\.desktopNumber)
+        )
+        let outcome = arrangePlan.press(
+            desktopsWithLayouts: desktopsWithLayouts,
+            activeDesktop: activeDesktop
+        )
+        if outcome.shouldObserve {
+            startObservingSpaceChanges()
+        } else {
+            stopObservingSpaceChanges()
+        }
+
+        feedback = arrangeFeedback(
+            for: report,
+            armedDesktopCount: arrangePlan.armedDesktops.count
+        )
+    }
+
+    /// Runs one Arrange pass, translating the engine's thrown errors into
+    /// user-facing feedback. Returns the report on success, or `nil` when the pass
+    /// could not run (feedback already set) so the caller aborts arming.
+    private func runArrange(_ applications: [ManagedApplication]) -> ArrangeReport? {
+        do {
+            return try windowArranger.arrange(managedApplications: applications)
+        } catch WindowArrangeError.accessibilityNotGranted {
+            feedback = .failure(
+                "Grant Desk Layouter Accessibility access in System Settings > "
+                    + "Privacy & Security > Accessibility, then press Arrange again. Nothing was moved."
+            )
+            return nil
+        } catch WindowArrangeError.noActiveScreen {
+            feedback = .failure("No active display could be resolved to arrange against. Nothing was moved.")
+            return nil
+        } catch {
+            feedback = .failure("Arrange failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Builds the feedback after an Arrange pass: it names how many windows moved,
+    /// explains that any armed Desktops are arranged on first visit, and — the key
+    /// signal — lists any windows that resisted the move so they are never dropped
+    /// silently (issue #27 acceptance criteria).
+    private func arrangeFeedback(for report: ArrangeReport, armedDesktopCount: Int) -> EditorFeedback {
+        var message = report.arranged.isEmpty
+            ? "Arranged this Desktop — no windows needed moving."
+            : "Arranged \(report.arranged.count) ^[window](inflect: true) on this Desktop."
+        if armedDesktopCount > 0 {
+            message += " \(armedDesktopCount) other ^[Desktop](inflect: true) with a Layout will be arranged the first time you visit ^[it](inflect: true)."
+        }
+        if report.hasResistance {
+            let names = report.resisted
+                .map(\.displayName)
+                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            message += " These windows resisted being moved (fixed-size, fullscreen, or a sheet): "
+                + names.joined(separator: ", ") + "."
+            return .failure(message)
+        }
+        return .success(message)
+    }
+
+    /// Starts observing Space changes so an armed Desktop is arranged the first
+    /// time it becomes active. Idempotent — a second Arrange while already
+    /// observing does not stack observers.
+    private func startObservingSpaceChanges() {
+        guard spaceChangeObserver == nil else { return }
+        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleActiveSpaceChange()
+            }
+        }
+    }
+
+    /// Tears the Space-change observation down entirely, so the app is not a
+    /// permanent background observer once every armed Desktop has been arranged.
+    private func stopObservingSpaceChanges() {
+        if let spaceChangeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
+            self.spaceChangeObserver = nil
+        }
+    }
+
+    /// Handles a Space change while arming is active: if the now-active Desktop is
+    /// armed, arrange it once and disarm it; when it was the last armed Desktop,
+    /// stop observing.
+    private func handleActiveSpaceChange() {
+        let activeDesktop = try? spacesAdapter.activeDesktopNumber()
+        switch arrangePlan.desktopBecameActive(activeDesktop) {
+        case .ignore:
+            return
+        case let .arrange(tearDownAfter):
+            if let report = runArrange(board.configuration.managedApplications) {
+                feedback = arrangeFeedback(for: report, armedDesktopCount: arrangePlan.armedDesktops.count)
+            }
+            if tearDownAfter {
+                stopObservingSpaceChanges()
+            }
+        }
     }
 
     /// Applies a transition to the board and persists it, but only when it

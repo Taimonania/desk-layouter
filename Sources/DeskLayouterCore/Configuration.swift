@@ -40,6 +40,14 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
     public var assignment: Assignment {
         Assignment(bundleIdentifier: bundleIdentifier, desktopNumber: desktopNumber)
     }
+
+    /// Whether this application carries a Layout that Arrange can actually enact:
+    /// a non-nil Layout that also validates. The same gate `ArrangeEngine` uses to
+    /// pick candidates, so a Desktop is never armed for a Layout the engine would
+    /// skip.
+    public var hasValidLayout: Bool {
+        layout?.isValid == true
+    }
 }
 
 /// The persisted Desk Layouter configuration: the applications the app manages
