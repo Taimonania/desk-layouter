@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// How an axis of a Desktop's screen is divided when placing a window: not at
+/// How an axis of a Desktop's usable area is divided when placing a window: not at
 /// all (full), or into halves, thirds, or fourths. The raw value is the number
 /// of equal cells the axis is split into, so `cellCount` reads straight off it
 /// and the persisted JSON stores a plain `1`, `2`, `3`, or `4`.
@@ -52,8 +52,8 @@ public struct LayoutSpan: Codable, Equatable, Sendable {
     public var cellCount: Int { end - start + 1 }
 }
 
-/// Where a managed application's window sits on its Desktop's screen: the screen
-/// is divided horizontally and vertically (each full — undivided — or into
+/// Where a managed application's window sits on its Desktop's usable area: that
+/// area is divided horizontally and vertically (each full — undivided — or into
 /// halves, thirds, or fourths), and the window occupies a column span and a row
 /// span of the resulting grid.
 ///
