@@ -181,7 +181,8 @@ public struct BoardState: Codable, Equatable, Sendable {
             ManagedApplication(
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
-                desktopNumber: desktopNumber
+                desktopNumber: desktopNumber,
+                layout: application.layout
             )
         )
     }
