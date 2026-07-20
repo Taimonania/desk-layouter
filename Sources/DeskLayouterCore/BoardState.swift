@@ -12,8 +12,8 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
     public let desktopNumber: Int
 
     /// Where this app's window sits on its Desktop, or `nil` when it has no
-    /// Layout. The board uses this both to distinguish arranged apps visually and
-    /// to seed the Layout editor with the app's current region.
+    /// Layout. The board uses this both to distinguish apps that have a Layout
+    /// visually and to seed the Layout editor with the app's current Layout.
     public let layout: Layout?
 
     public init(
@@ -28,8 +28,8 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
         self.layout = layout
     }
 
-    /// Whether this app has a Layout — the flag the board reads to show arranged
-    /// apps differently from unarranged ones.
+    /// Whether this app has a Layout — the flag the board reads to show apps that
+    /// have a Layout differently from those that do not.
     public var hasLayout: Bool { layout != nil }
 
     /// Stable identity for drag sources and list diffing: a managed application

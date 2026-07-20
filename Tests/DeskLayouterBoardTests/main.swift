@@ -195,8 +195,8 @@ struct BoardStateTestRunner {
         }
 
         // Layout: setting a Layout on a managed app persists it on the card and
-        // marks it arranged, but does NOT create a pending Assignment change —
-        // Layout is enacted by Arrange, not Apply.
+        // marks it as having a Layout, but does NOT create a pending Assignment
+        // change — Layout is enacted by Arrange, not Apply.
         do {
             var board = BoardState(
                 configuration: DeskLayouterConfiguration(managedApplications: [
@@ -217,7 +217,7 @@ struct BoardStateTestRunner {
         }
 
         // Layout: clearing returns the app to no Layout, and the card is again
-        // distinguishable as unarranged. Moving a card preserves its Layout.
+        // distinguishable as having no Layout. Moving a card preserves its Layout.
         do {
             var board = BoardState(
                 configuration: DeskLayouterConfiguration(managedApplications: [

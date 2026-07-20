@@ -111,11 +111,11 @@ public struct Layout: Codable, Equatable, Sendable {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    /// Whether the cell at the given 0-based `column` and `row` falls inside this
-    /// Layout's occupied region. Column indices increase left-to-right and row
-    /// indices increase top-to-bottom (row 0 is the top of the screen), so this
-    /// reads straight off the two spans. Used to paint the editor's mini-grid
-    /// preview and to describe the chosen region.
+    /// Whether the cell at the given 0-based `column` and `row` is one of the
+    /// cells this Layout's window occupies. Column indices increase left-to-right
+    /// and row indices increase top-to-bottom (row 0 is the top of the screen), so
+    /// this reads straight off the two spans. Used to paint the editor's mini-grid
+    /// preview and to describe which cells the window covers.
     public func occupies(column: Int, row: Int) -> Bool {
         columnSpan.start <= column && column <= columnSpan.end
             && rowSpan.start <= row && row <= rowSpan.end

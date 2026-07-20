@@ -16,7 +16,7 @@ let package = Package(
             name: "DeskLayouterMacOS",
             dependencies: ["DeskLayouterCore"],
             path: "Sources/DeskLayouter",
-            exclude: ["AppDelegate.swift", "EditorModel.swift", "EditorView.swift"],
+            exclude: ["AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift"],
             sources: [
                 "SpacesAdapter.swift",
                 "DisplayResolution.swift",

@@ -96,8 +96,9 @@ public struct LayoutDraft: Equatable, Sendable {
 
     // MARK: - Mini-grid mapping
 
-    /// Whether the cell at the given 0-based `column` and `row` is occupied by the
-    /// draft's region — the mapping the mini-grid preview paints. Row 0 is the top.
+    /// Whether the cell at the given 0-based `column` and `row` is one of the
+    /// cells the draft's window occupies — the mapping the mini-grid preview
+    /// paints. Row 0 is the top.
     public func isCellOccupied(column: Int, row: Int) -> Bool {
         layout.occupies(column: column, row: row)
     }

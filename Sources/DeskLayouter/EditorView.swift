@@ -200,9 +200,9 @@ struct EditorView: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-        // Cards with a Layout carry a faint accent border so arranged apps are
-        // distinguishable at a glance from unarranged ones (which get the neutral
-        // border).
+        // Cards with a Layout carry a faint accent border so apps that have a
+        // Layout are distinguishable at a glance from those that do not (which get
+        // the neutral border).
         .overlay(
             RoundedRectangle(cornerRadius: 8).strokeBorder(
                 card.hasLayout ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2),
@@ -229,7 +229,7 @@ struct EditorView: View {
 
     /// The Layout affordance on a card: a live mini-grid preview when the app has a
     /// Layout, or a dashed grid glyph when it does not. Either way it opens the
-    /// Layout editor, so the region is both shown and editable in one place.
+    /// Layout editor, so the Layout is both shown and editable in one place.
     private func layoutButton(_ card: BoardCard) -> some View {
         Button {
             editingLayoutCard = card

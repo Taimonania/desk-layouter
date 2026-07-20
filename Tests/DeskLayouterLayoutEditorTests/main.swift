@@ -29,7 +29,7 @@ struct LayoutDraftTestRunner {
         }
 
         // Seeding round-trips a valid Layout unchanged, so opening the editor on an
-        // arranged app shows exactly its stored region.
+        // app that has a Layout shows exactly its stored Layout.
         do {
             let layout = Layout(
                 horizontalDivision: .thirds,
@@ -123,7 +123,7 @@ struct LayoutDraftTestRunner {
             draft.setVerticalDivision(.thirds)
             draft.setRowStart(2)
             draft.setRowEnd(2) // last (bottom) third only
-            check("occupied cell inside the region reads true", draft.isCellOccupied(column: 0, row: 2))
+            check("an occupied cell reads true", draft.isCellOccupied(column: 0, row: 2))
             check("top row is not occupied for a last-third span", draft.isCellOccupied(column: 0, row: 0) == false)
             check("cell outside the column span reads false", draft.isCellOccupied(column: 1, row: 2) == false)
             check("draft occupancy matches its Layout's",
