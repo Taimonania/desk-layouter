@@ -168,8 +168,8 @@ make_probe_app "$probe_app_b" "$probe_bundle_id_b"
 
 # --- Determine current Desktop and two non-current target Desktops ----------
 original_active_space_id="$($probe_executable_a --active-space)"
-built_in_display_identifier="$($probe_executable_a --built-in-display-identifier)"
-desktop_managed_space_ids="$(/usr/bin/jq -c --arg display "$built_in_display_identifier" '
+active_display_identifier="$($probe_executable_a --active-display-identifier)"
+desktop_managed_space_ids="$(/usr/bin/jq -c --arg display "$active_display_identifier" '
     [.SpacesDisplayConfiguration["Management Data"].Monitors[]
     | select(."Display Identifier" == $display)
     | .Spaces[]
@@ -178,7 +178,7 @@ desktop_managed_space_ids="$(/usr/bin/jq -c --arg display "$built_in_display_ide
 ' "$store_snapshot_json")"
 
 targets="$(/usr/bin/jq -r \
-    --arg display "$built_in_display_identifier" \
+    --arg display "$active_display_identifier" \
     --argjson current "$original_active_space_id" '
     [.SpacesDisplayConfiguration["Management Data"].Monitors[]
     | select(."Display Identifier" == $display)
@@ -190,7 +190,7 @@ targets="$(/usr/bin/jq -r \
 
 target_count="$(printf '%s' "$targets" | /usr/bin/jq 'length')"
 if (( target_count < 2 )); then
-    print -u2 "SKIP: this test needs at least two non-current Desktops (with UUIDs) on the built-in display; found $target_count"
+    print -u2 "SKIP: this test needs at least two non-current Desktops (with UUIDs) on the active display; found $target_count"
     exit 2
 fi
 target1_id="$(printf '%s' "$targets" | /usr/bin/jq -r '.[0][0]')"

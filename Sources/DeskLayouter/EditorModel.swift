@@ -80,9 +80,13 @@ final class EditorModel: ObservableObject {
     /// choices and accept new Assignments.
     var canEditAssignments: Bool { desktopCount > 0 }
 
-    /// True when there are pending changes to write, so Apply is enabled. Apply is
-    /// disabled on a clean board.
-    var canApply: Bool { board.isDirty }
+    /// True when there are pending changes to write *and* a single active
+    /// Display resolved, so Apply is enabled. Apply is disabled on a clean board,
+    /// and also whenever the active Display could not be resolved (no active
+    /// Display, or multiple extended Displays) — pending edits are kept, but they
+    /// cannot be written until the topology is a single Display again
+    /// (issue #18, ACs 5–6).
+    var canApply: Bool { board.isDirty && desktopCount > 0 }
 
     /// The status text shown beneath the board.
     var statusMessage: String { feedback.message }
@@ -104,10 +108,12 @@ final class EditorModel: ObservableObject {
         applications = applicationsProvider.applications()
     }
 
-    /// Reads the current Desktops on the built-in display so the board renders one
-    /// column per real Desktop and Desktop choices are constrained to Desktops
-    /// that actually exist. A read failure surfaces the adapter's error and leaves
-    /// the board with no columns rather than offering invalid Desktops.
+    /// Reads the current Desktops on the sole active Display so the board renders
+    /// one column per real Desktop and Desktop choices are constrained to Desktops
+    /// that actually exist. A read failure — including no active Display or
+    /// multiple extended Displays — surfaces the adapter's error and leaves the
+    /// board with no columns (and Apply disabled) rather than offering invalid
+    /// Desktops. The saved board is untouched, so pending edits are preserved.
     func refreshDesktops() {
         do {
             let snapshot = try spacesAdapter.currentDesktopSnapshot()
@@ -145,7 +151,7 @@ final class EditorModel: ObservableObject {
             return
         }
         guard canEditAssignments else {
-            feedback = .info("No Desktops are available on the built-in display.")
+            feedback = .info("No Desktops are available on the active display.")
             return
         }
         guard (1...desktopCount).contains(newAssignmentDesktopNumber) else {
@@ -217,7 +223,11 @@ final class EditorModel: ObservableObject {
             )
             try spacesAdapter.apply(
                 managedBindings: managedBindings,
-                managedBundleIdentifiers: board.configuration.ownedBundleIdentifiers
+                managedBundleIdentifiers: board.configuration.ownedBundleIdentifiers,
+                // Revalidated against a fresh read just before the first mutation
+                // so a display change between this snapshot and Apply aborts
+                // without writing (issue #18, AC 8).
+                expectedSnapshot: snapshot
             )
             // Capture what changed in this Apply before advancing the baseline, so
             // the summary names only the apps whose Desktop actually changed.
@@ -288,7 +298,7 @@ final class EditorModel: ObservableObject {
     }
 
     private func desktopDoesNotExistMessage(_ desktopNumber: Int) -> String {
-        "Desktop \(desktopNumber) does not exist on the built-in display."
+        "Desktop \(desktopNumber) does not exist on the active display."
     }
 
     private func refreshProjection() {

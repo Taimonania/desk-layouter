@@ -1,5 +1,3 @@
-import ColorSync
-import CoreGraphics
 import Darwin
 import DeskLayouterCore
 import Foundation
@@ -18,9 +16,16 @@ public protocol SpacesAdapter {
     ///     the ownership set. Owned keys absent from `managedBindings` (removed
     ///     or skipped Assignments) are deleted from the macOS bindings, while
     ///     unmanaged entries are preserved untouched.
+    ///   - expectedSnapshot: the Desktop snapshot `managedBindings` was resolved
+    ///     against. When non-nil, Apply re-reads the active Display's snapshot
+    ///     immediately before the first mutation and aborts without writing (and
+    ///     without restarting the Dock) if the topology changed underneath — so
+    ///     a lid, hot-plug, or main-display change between planning and Apply can
+    ///     never write bindings against a stale Desktop order.
     func apply(
         managedBindings: [String: String],
-        managedBundleIdentifiers: Set<String>
+        managedBundleIdentifiers: Set<String>,
+        expectedSnapshot: DesktopSnapshot?
     ) throws
 }
 
@@ -46,73 +51,38 @@ public protocol SessionBindingUpdating {
 public final class MacOSSpacesAdapter: SpacesAdapter {
     private let commandRunner: CommandRunning
     private let sessionBindingUpdater: SessionBindingUpdating
+    private let displayInventory: DisplayInventoryProviding
 
     public init(
         commandRunner: CommandRunning? = nil,
-        sessionBindingUpdater: SessionBindingUpdating? = nil
+        sessionBindingUpdater: SessionBindingUpdating? = nil,
+        displayInventory: DisplayInventoryProviding? = nil
     ) {
         self.commandRunner = commandRunner ?? CommandRunner()
         self.sessionBindingUpdater = sessionBindingUpdater ?? SessionBindingUpdater()
+        self.displayInventory = displayInventory ?? CoreGraphicsDisplayInventory()
     }
 
     public func currentDesktopSnapshot() throws -> DesktopSnapshot {
-        let builtInDisplayIdentifier = try builtInDisplayIdentifier()
-        let store = try readStore()
-        guard
-            let configuration = store["SpacesDisplayConfiguration"] as? [String: Any],
-            let managementData = configuration["Management Data"] as? [String: Any],
-            let monitors = managementData["Monitors"] as? [[String: Any]],
-            let builtInMonitor = monitors.first(where: {
-                $0["Display Identifier"] as? String == builtInDisplayIdentifier
-                    && $0["Spaces"] != nil
-            }),
-            let desktopEntries = builtInMonitor["Spaces"] as? [[String: Any]]
-        else {
-            throw SpacesAdapterError.storeFormatChanged
-        }
-
-        let orderedDesktopUUIDs = desktopEntries.compactMap { entry -> String? in
-            guard entry["TileLayoutManager"] == nil else {
-                return nil
-            }
-            return entry["uuid"] as? String
-        }
-
-        guard !orderedDesktopUUIDs.isEmpty else {
-            throw SpacesAdapterError.noDesktopsFound
-        }
-
-        return DesktopSnapshot(orderedDesktopUUIDs: orderedDesktopUUIDs)
-    }
-
-    private func builtInDisplayIdentifier() throws -> String {
-        var displayCount: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success else {
-            throw SpacesAdapterError.displayEnumerationFailed
-        }
-
-        var displayIdentifiers = Array(
-            repeating: CGDirectDisplayID(),
-            count: Int(displayCount)
+        // Resolve the sole active logical Display — built-in, external with the
+        // lid closed, or a mirrored group — to the private "Main" monitor key,
+        // then read that monitor's live Desktops. Zero or multiple extended
+        // Displays throw before any store read, leaving macOS untouched.
+        let displayKey = try DisplayResolution.activeDisplayKey(
+            for: displayInventory.activeDisplays()
         )
-        guard
-            CGGetActiveDisplayList(displayCount, &displayIdentifiers, &displayCount) == .success,
-            let builtInDisplay = displayIdentifiers.first(where: { CGDisplayIsBuiltin($0) != 0 })
-        else {
-            throw SpacesAdapterError.builtInDisplayNotFound
-        }
-
-        if builtInDisplay == CGMainDisplayID() {
-            return "Main"
-        }
-
-        let displayUUID = CGDisplayCreateUUIDFromDisplayID(builtInDisplay).takeRetainedValue()
-        return CFUUIDCreateString(nil, displayUUID) as String
+        let store = try readStore()
+        let orderedDesktopUUIDs = try DisplayResolution.orderedDesktopUUIDs(
+            fromStore: store,
+            displayKey: displayKey
+        )
+        return DesktopSnapshot(orderedDesktopUUIDs: orderedDesktopUUIDs)
     }
 
     public func apply(
         managedBindings: [String: String],
-        managedBundleIdentifiers: Set<String>
+        managedBundleIdentifiers: Set<String>,
+        expectedSnapshot: DesktopSnapshot? = nil
     ) throws {
         // Preflight the private session-binding ABI before touching any
         // persistent state. If the symbols are unavailable, Apply fails closed
@@ -138,6 +108,22 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             desiredManaged: desiredManaged,
             managedOwnedKeys: managedOwnedKeys
         )
+
+        // Revalidate the active Display, main role, and ordered Desktop snapshot
+        // immediately before the first mutation. `managedBindings` was resolved
+        // against `expectedSnapshot`; a fresh read that no longer matches means
+        // the topology changed underneath (a lid transition, hot-plug, or
+        // main-display change), so abort with no write and no Dock restart
+        // rather than persisting bindings against a stale Desktop order
+        // (issue #18, AC 8). A change that makes the setup unresolvable — a
+        // second Display appearing or the last Display leaving — throws from
+        // `currentDesktopSnapshot()` itself, aborting just as fail-closed before
+        // any mutation.
+        if let expectedSnapshot {
+            guard try currentDesktopSnapshot() == expectedSnapshot else {
+                throw SpacesAdapterError.displayTopologyChanged
+            }
+        }
 
         // Rewrite the whole dictionary. A plain `-dict-add` can only add or
         // replace keys, so the existing dictionary is cleared first and then the
@@ -207,9 +193,11 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
 }
 
 public enum SpacesAdapterError: LocalizedError, Equatable {
-    case builtInDisplayNotFound
     case commandFailed(executable: String, status: Int32, message: String)
     case displayEnumerationFailed
+    case displayTopologyChanged
+    case multipleDisplaysUnsupported
+    case noActiveDisplay
     case noDesktopsFound
     case sessionBindingAPIUnavailable
     case storeFormatChanged
@@ -217,14 +205,18 @@ public enum SpacesAdapterError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .builtInDisplayNotFound:
-            "No active built-in display was found."
         case let .commandFailed(executable, status, message):
             "\(executable) failed with status \(status): \(message)"
         case .displayEnumerationFailed:
             "The active displays could not be read."
+        case .displayTopologyChanged:
+            "The displays changed while applying. Nothing was written — review the board and try again."
+        case .multipleDisplaysUnsupported:
+            "Multiple displays are not yet supported. Use a single active display."
+        case .noActiveDisplay:
+            "No active display was found."
         case .noDesktopsFound:
-            "No Desktops were found on the built-in display."
+            "No Desktops were found on the active display."
         case .sessionBindingAPIUnavailable:
             "The macOS Desktop session binding API is unavailable."
         case .storeFormatChanged:

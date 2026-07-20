@@ -106,7 +106,7 @@ public struct BoardState: Codable, Equatable, Sendable {
 
     /// Projects the working configuration into one column per Desktop, in
     /// positional order (Desktop 1, 2, 3, …), for the given number of Desktops on
-    /// the built-in display.
+    /// the active display.
     ///
     /// The count comes from the live Desktop snapshot, so the board renders as
     /// many columns as the machine actually has — whether that is one, three, or

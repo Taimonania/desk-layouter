@@ -4,15 +4,18 @@ import Darwin
 import Foundation
 
 private enum ProbeError: Error, CustomStringConvertible {
-    case builtInDisplayNotFound
+    case noActiveDisplay
+    case multipleDisplaysUnsupported
     case displayEnumerationFailed
     case missingSymbol(String)
     case noSpaces(Int32)
 
     var description: String {
         switch self {
-        case .builtInDisplayNotFound:
-            "no active built-in display was found"
+        case .noActiveDisplay:
+            "no active display was found"
+        case .multipleDisplaysUnsupported:
+            "multiple displays are not yet supported"
         case .displayEnumerationFailed:
             "active displays could not be read"
         case let .missingSymbol(symbol):
@@ -23,7 +26,12 @@ private enum ProbeError: Error, CustomStringConvertible {
     }
 }
 
-private func builtInDisplayIdentifier() throws -> String {
+/// Resolves the sole active logical display to its private Spaces monitor key,
+/// mirroring `DisplayResolution.activeMonitorKey`: mirror secondaries collapse
+/// into their master, the one remaining display is the main display, and its
+/// live Spaces are keyed by the private "Main" alias — whether built in,
+/// external with the lid closed, or a mirrored group.
+private func activeDisplayIdentifier() throws -> String {
     var displayCount: UInt32 = 0
     guard CGGetActiveDisplayList(0, nil, &displayCount) == .success else {
         throw ProbeError.displayEnumerationFailed
@@ -34,17 +42,21 @@ private func builtInDisplayIdentifier() throws -> String {
         count: Int(displayCount)
     )
     guard
-        CGGetActiveDisplayList(displayCount, &displayIdentifiers, &displayCount) == .success,
-        let builtInDisplay = displayIdentifiers.first(where: { CGDisplayIsBuiltin($0) != 0 })
+        CGGetActiveDisplayList(displayCount, &displayIdentifiers, &displayCount) == .success
     else {
-        throw ProbeError.builtInDisplayNotFound
+        throw ProbeError.displayEnumerationFailed
     }
 
-    if builtInDisplay == CGMainDisplayID() {
-        return "Main"
+    let logicalDisplays = displayIdentifiers
+        .prefix(Int(displayCount))
+        .filter { CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay }
+    guard !logicalDisplays.isEmpty else {
+        throw ProbeError.noActiveDisplay
     }
-    let displayUUID = CGDisplayCreateUUIDFromDisplayID(builtInDisplay).takeRetainedValue()
-    return CFUUIDCreateString(nil, displayUUID) as String
+    guard logicalDisplays.count == 1 else {
+        throw ProbeError.multipleDisplaysUnsupported
+    }
+    return "Main"
 }
 
 private typealias MainConnection = @convention(c) () -> Int32
@@ -186,9 +198,9 @@ private final class ProbeApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--built-in-display-identifier" {
+if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--active-display-identifier" {
     do {
-        print(try builtInDisplayIdentifier())
+        print(try activeDisplayIdentifier())
     } catch {
         fputs("\(error)\n", stderr)
         exit(1)

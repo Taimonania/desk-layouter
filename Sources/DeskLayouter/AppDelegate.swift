@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 
 @MainActor
@@ -32,10 +33,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "Desk Layouter"
         }
         self.statusItem = statusItem
+
+        startObservingDisplayReconfiguration()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Registers for display topology changes (connect/disconnect, lid open or
+    /// close, main-display or mirroring change) so the board re-reads the active
+    /// Display's Desktops whenever the topology changes while the editor is open.
+    /// The saved board is never touched here, so pending edits are preserved
+    /// across the change (issue #18, AC 7).
+    private func startObservingDisplayReconfiguration() {
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        CGDisplayRegisterReconfigurationCallback({ _, flags, userInfo in
+            // The pre-change callback fires before CoreGraphics state is current;
+            // act only on the post-change callback.
+            guard !flags.contains(.beginConfigurationFlag), let userInfo else { return }
+            let delegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
+            Task { @MainActor in
+                delegate.editorModel.refreshDesktops()
+            }
+        }, context)
     }
 
     @objc
