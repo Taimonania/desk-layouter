@@ -5,7 +5,7 @@ import Foundation
 /// halves, thirds, or fourths. The raw value is the number of equal cells the
 /// axis is split into, so `cellCount` reads straight off it and the persisted
 /// JSON stores a plain `2`, `3`, or `4`.
-public enum Division: Int, Codable, Equatable, Sendable {
+public enum Division: Int, Codable, Equatable, Sendable, CaseIterable {
     case halves = 2
     case thirds = 3
     case fourths = 4
@@ -109,6 +109,16 @@ public struct Layout: Codable, Equatable, Sendable {
         let minY = visibleFrame.maxY - visibleFrame.height * (CGFloat(rowSpan.end + 1) / rows)
 
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// Whether the cell at the given 0-based `column` and `row` falls inside this
+    /// Layout's occupied region. Column indices increase left-to-right and row
+    /// indices increase top-to-bottom (row 0 is the top of the screen), so this
+    /// reads straight off the two spans. Used to paint the editor's mini-grid
+    /// preview and to describe the chosen region.
+    public func occupies(column: Int, row: Int) -> Bool {
+        columnSpan.start <= column && column <= columnSpan.end
+            && rowSpan.start <= row && row <= rowSpan.end
     }
 
     /// Rejects Layouts whose span does not fit its division: an empty span (its

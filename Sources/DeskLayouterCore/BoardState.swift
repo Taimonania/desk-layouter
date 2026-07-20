@@ -11,11 +11,26 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
     public let displayName: String
     public let desktopNumber: Int
 
-    public init(bundleIdentifier: String, displayName: String, desktopNumber: Int) {
+    /// Where this app's window sits on its Desktop, or `nil` when it has no
+    /// Layout. The board uses this both to distinguish arranged apps visually and
+    /// to seed the Layout editor with the app's current region.
+    public let layout: Layout?
+
+    public init(
+        bundleIdentifier: String,
+        displayName: String,
+        desktopNumber: Int,
+        layout: Layout? = nil
+    ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
         self.desktopNumber = desktopNumber
+        self.layout = layout
     }
+
+    /// Whether this app has a Layout — the flag the board reads to show arranged
+    /// apps differently from unarranged ones.
+    public var hasLayout: Bool { layout != nil }
 
     /// Stable identity for drag sources and list diffing: a managed application
     /// is assigned to exactly one Desktop, so its bundle identifier is unique
@@ -123,7 +138,8 @@ public struct BoardState: Codable, Equatable, Sendable {
                 BoardCard(
                     bundleIdentifier: application.bundleIdentifier,
                     displayName: application.displayName,
-                    desktopNumber: application.desktopNumber
+                    desktopNumber: application.desktopNumber,
+                    layout: application.layout
                 )
             )
         }
@@ -183,6 +199,25 @@ public struct BoardState: Codable, Equatable, Sendable {
                 displayName: application.displayName,
                 desktopNumber: desktopNumber,
                 layout: application.layout
+            )
+        )
+    }
+
+    /// Sets (or with `nil`, clears) a managed application's Layout, preserving its
+    /// Desktop Assignment and display name. Setting a Layout arranges *where* on a
+    /// Desktop the window sits; it does not change *which* Desktop, so it never
+    /// affects the pending-Assignment count — Layout is enacted by Arrange, not
+    /// Apply. Passing an unmanaged bundle identifier is a harmless no-op.
+    public mutating func setLayout(_ layout: Layout?, forBundleIdentifier bundleIdentifier: String) {
+        guard let application = configuration.managedApplication(for: bundleIdentifier) else {
+            return
+        }
+        configuration.upsert(
+            ManagedApplication(
+                bundleIdentifier: application.bundleIdentifier,
+                displayName: application.displayName,
+                desktopNumber: application.desktopNumber,
+                layout: layout
             )
         )
     }

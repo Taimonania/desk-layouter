@@ -55,6 +55,11 @@ let package = Package(
             path: "Tests/DeskLayouterLayoutTests"
         ),
         .executableTarget(
+            name: "DeskLayouterLayoutEditorTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterLayoutEditorTests"
+        ),
+        .executableTarget(
             name: "DeskLayouterConfigStoreTests",
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterConfigStoreTests"

@@ -194,6 +194,71 @@ struct BoardStateTestRunner {
             check("a board document without a baseline decodes as clean", decoded?.isDirty == false, "got \(String(describing: decoded?.pendingChanges))")
         }
 
+        // Layout: setting a Layout on a managed app persists it on the card and
+        // marks it arranged, but does NOT create a pending Assignment change —
+        // Layout is enacted by Arrange, not Apply.
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("Writer", "com.example.Writer", desktop: 1),
+                ])
+            )
+            let layout = Layout(
+                horizontalDivision: .thirds,
+                verticalDivision: .halves,
+                columnSpan: .single(2),
+                rowSpan: .single(0)
+            )
+            board.setLayout(layout, forBundleIdentifier: "com.example.Writer")
+            let card = board.columns(desktopCount: 1)[0].cards.first
+            check("setting a Layout attaches it to the card", card?.layout == layout, "got \(String(describing: card?.layout))")
+            check("card reports it has a Layout", card?.hasLayout == true)
+            check("setting a Layout does not add a pending Assignment change", board.pendingChangeCount == 0, "got \(board.pendingChangeCount)")
+        }
+
+        // Layout: clearing returns the app to no Layout, and the card is again
+        // distinguishable as unarranged. Moving a card preserves its Layout.
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("Writer", "com.example.Writer", desktop: 1),
+                ])
+            )
+            let layout = Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0))
+            board.setLayout(layout, forBundleIdentifier: "com.example.Writer")
+            board.move(bundleIdentifier: "com.example.Writer", toDesktop: 2)
+            check("moving a card keeps its Layout", board.columns(desktopCount: 2)[1].cards.first?.layout == layout)
+            board.setLayout(nil, forBundleIdentifier: "com.example.Writer")
+            let card = board.columns(desktopCount: 2)[1].cards.first
+            check("clearing a Layout returns the app to no Layout", card?.layout == nil)
+            check("cleared card reports it has no Layout", card?.hasLayout == false)
+        }
+
+        // Layout: setting a Layout on an unmanaged bundle identifier is a no-op.
+        do {
+            var board = BoardState()
+            board.setLayout(
+                Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0)),
+                forBundleIdentifier: "com.example.Ghost"
+            )
+            check("setting a Layout on an unmanaged app changes nothing", board.configuration.managedApplications.isEmpty)
+        }
+
+        // Layout: a set Layout survives serialization so it persists across quit.
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("Writer", "com.example.Writer", desktop: 1),
+                ])
+            )
+            let layout = Layout(horizontalDivision: .fourths, verticalDivision: .thirds, columnSpan: LayoutSpan(start: 1, end: 3), rowSpan: .single(2))
+            board.setLayout(layout, forBundleIdentifier: "com.example.Writer")
+            let decoded = try? BoardStateSerialization.decode(from: BoardStateSerialization.encode(board))
+            check("a set Layout round-trips through serialization",
+                  decoded?.columns(desktopCount: 1).first?.cards.first?.layout == layout,
+                  "got \(String(describing: decoded))")
+        }
+
         if failures.isEmpty {
             print("Board state tests passed")
         } else {

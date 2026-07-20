@@ -17,6 +17,7 @@ test:
 	swift run DeskLayouterPlannerTests
 	swift run DeskLayouterBoardTests
 	swift run DeskLayouterLayoutTests
+	swift run DeskLayouterLayoutEditorTests
 	swift run DeskLayouterConfigStoreTests
 	swift run DeskLayouterPickerTests
 	swift run DeskLayouterReconcilerTests

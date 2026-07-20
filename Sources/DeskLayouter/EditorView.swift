@@ -8,6 +8,7 @@ struct EditorView: View {
     @State private var dropTargetDesktop: Int?
     @State private var searchFieldWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
+    @State private var editingLayoutCard: BoardCard?
 
     private static let boardPadding: CGFloat = 20
 
@@ -53,6 +54,9 @@ struct EditorView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .frame(minWidth: 760, minHeight: 640)
+        .sheet(item: $editingLayoutCard) { card in
+            LayoutEditorView(model: model, card: currentCard(for: card) ?? card)
+        }
         .onPreferenceChange(SearchFieldWidthKey.self) { searchFieldWidth = $0 }
         .onAppear { model.refresh() }
         // The Desktop list is a point-in-time snapshot; re-read it when the
@@ -191,22 +195,64 @@ struct EditorView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)
+            layoutButton(card)
             cardControls(card)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.2)))
+        // Cards with a Layout carry a faint accent border so arranged apps are
+        // distinguishable at a glance from unarranged ones (which get the neutral
+        // border).
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).strokeBorder(
+                card.hasLayout ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.2),
+                lineWidth: card.hasLayout ? 1.5 : 1
+            )
+        )
         .onDrag {
             NSItemProvider(object: card.bundleIdentifier as NSString)
         }
         .contextMenu {
+            Button(card.hasLayout ? "Edit Layout…" : "Set Layout…") {
+                editingLayoutCard = card
+            }
+            Divider()
             moveButtons(for: card)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Self.appDisplayName(card.displayName)), Desktop \(card.desktopNumber). Draggable")
+        .accessibilityLabel("\(Self.appDisplayName(card.displayName)), Desktop \(card.desktopNumber), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable")
         .accessibilityActions {
+            Button(card.hasLayout ? "Edit Layout" : "Set Layout") { editingLayoutCard = card }
             moveButtons(for: card)
         }
+    }
+
+    /// The Layout affordance on a card: a live mini-grid preview when the app has a
+    /// Layout, or a dashed grid glyph when it does not. Either way it opens the
+    /// Layout editor, so the region is both shown and editable in one place.
+    private func layoutButton(_ card: BoardCard) -> some View {
+        Button {
+            editingLayoutCard = card
+        } label: {
+            if let layout = card.layout {
+                LayoutGridPreview(layout: layout, cellSize: 5, spacing: 1)
+            } else {
+                Image(systemName: "square.grid.2x2")
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(card.hasLayout ? "Edit this app's Layout" : "Set a Layout for this app")
+        .accessibilityLabel(card.hasLayout ? "Edit Layout for \(Self.appDisplayName(card.displayName))" : "Set Layout for \(Self.appDisplayName(card.displayName))")
+    }
+
+    /// The freshest projection of a card by bundle identifier, so a sheet opened
+    /// from a card always seeds from the current stored Layout rather than a stale
+    /// capture.
+    private func currentCard(for card: BoardCard) -> BoardCard? {
+        model.columns
+            .flatMap(\.cards)
+            .first { $0.bundleIdentifier == card.bundleIdentifier }
     }
 
     /// A pointer-free move path that mirrors the drag-and-drop affordance, shared by

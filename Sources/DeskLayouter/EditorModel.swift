@@ -205,6 +205,21 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// Sets (or with `nil`, clears) a managed application's Layout and persists the
+    /// board immediately so it survives relaunch. Layout decides *where* on a
+    /// Desktop the window sits; it is enacted by Arrange (issue #27), not Apply, so
+    /// this never changes the pending-Assignment count. A no-op change (same
+    /// Layout) is not persisted.
+    func setLayout(_ layout: Layout?, forBundleIdentifier bundleIdentifier: String) {
+        mutateAndPersist(
+            info: layout == nil
+                ? "Cleared the Layout."
+                : "Set the Layout. Use Arrange to move the window into it."
+        ) {
+            $0.setLayout(layout, forBundleIdentifier: bundleIdentifier)
+        }
+    }
+
     /// Applies every managed Assignment to both macOS representations, reusing the
     /// existing delete-aware adapter path (managed bindings plus managed-owned
     /// keys, unmanaged preserved). On success the board's applied baseline is
