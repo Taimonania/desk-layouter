@@ -21,7 +21,7 @@ Writing the current Assignments into macOS's Spaces store and restarting the Doc
 _Avoid_: Sync, save, flush.
 
 **Layout**:
-A persistent rule for where a managed application's window sits on its Desktop's screen, expressed as a horizontal and vertical division (halves, thirds, or fourths) and the cell or span the window occupies on each axis. Assignment decides _which_ Desktop; Layout decides _where on it_. Per-application and independent — two apps' Layouts may overlap or leave gaps.
+A persistent rule for where a managed application's window sits on its Desktop's usable area, expressed as a horizontal and vertical division (full, halves, thirds, or fourths) and the cell or span the window occupies on each axis. “Full” covers the complete usable axis without entering macOS fullscreen. Assignment decides _which_ Desktop; Layout decides _where on it_. Per-application and independent — two apps' Layouts may overlap or leave gaps.
 _Avoid_: Tile, arrangement, region, split.
 
 **Arrange**:

@@ -174,6 +174,120 @@ struct LayoutTestRunner {
             check("adjacent fourths meet with no gap", contiguous)
         }
 
+        // Full division: one cell covering the whole axis. Full width and full
+        // height together cover the entire usable frame edge-to-edge.
+        do {
+            let layout = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .full,
+                columnSpan: .single(0),
+                rowSpan: .single(0)
+            )
+            let rect = layout.targetFrame(in: frame)
+            check(
+                "full×full covers the whole usable frame",
+                rectsEqual(rect, CGRect(x: 0, y: 0, width: 1000, height: 800)),
+                "got \(rect)"
+            )
+        }
+
+        // A Full axis has exactly one cell.
+        do {
+            check("full division has one cell", Division.full.cellCount == 1)
+        }
+
+        // Full on one axis, divided on the other: full width, bottom half.
+        do {
+            let layout = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .halves,
+                columnSpan: .single(0),
+                rowSpan: .single(1)
+            )
+            let rect = layout.targetFrame(in: frame)
+            check(
+                "full width with bottom-half height occupies the lower strip",
+                rectsEqual(rect, CGRect(x: 0, y: 0, width: 1000, height: 400)),
+                "got \(rect)"
+            )
+        }
+
+        // Division offers Full, Halves, Thirds, Fourths in that order.
+        do {
+            check(
+                "divisions are offered in the order full, halves, thirds, fourths",
+                Division.allCases == [.full, .halves, .thirds, .fourths],
+                "got \(Division.allCases)"
+            )
+        }
+
+        // A Full axis validates only with its single cell; a wider span is
+        // out of bounds on that axis.
+        do {
+            let valid = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .full,
+                columnSpan: .single(0),
+                rowSpan: .single(0)
+            )
+            check("a Full-axis Layout validates", valid.isValid)
+
+            let tooWide = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .halves,
+                columnSpan: LayoutSpan(start: 0, end: 1),
+                rowSpan: .single(0)
+            )
+            check(
+                "a span wider than a Full axis is out of bounds",
+                throwsValidation(tooWide) == .spanOutOfBounds(.column),
+                "got \(String(describing: throwsValidation(tooWide)))"
+            )
+        }
+
+        // A Full-axis Layout persists and reloads correctly.
+        do {
+            let layout = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .thirds,
+                columnSpan: .single(0),
+                rowSpan: .single(2)
+            )
+            let app = ManagedApplication(
+                bundleIdentifier: "com.example.Full",
+                displayName: "Full",
+                desktopNumber: 1,
+                layout: layout
+            )
+            let config = DeskLayouterConfiguration(managedApplications: [app])
+            let decoded = try? ConfigurationSerialization.decode(
+                from: ConfigurationSerialization.encode(config)
+            )
+            check(
+                "a Full-axis Layout round-trips through persistence",
+                decoded?.managedApplications.first?.layout == layout,
+                "got \(String(describing: decoded?.managedApplications.first?.layout))"
+            )
+        }
+
+        // Existing persisted Layouts (divisions stored as 2/3/4) remain
+        // compatible — Full's raw value (1) does not collide with them.
+        do {
+            let legacyJSON = Data(#"{"managedApplications":[{"bundleIdentifier":"com.example.Legacy","displayName":"Legacy","desktopNumber":1,"layout":{"horizontalDivision":2,"verticalDivision":3,"columnSpan":{"start":0,"end":1},"rowSpan":{"start":0,"end":0}}}]}"#.utf8)
+            let decoded = try? ConfigurationSerialization.decode(from: legacyJSON)
+            let expected = Layout(
+                horizontalDivision: .halves,
+                verticalDivision: .thirds,
+                columnSpan: LayoutSpan(start: 0, end: 1),
+                rowSpan: .single(0)
+            )
+            check(
+                "a pre-Full persisted Layout still decodes unchanged",
+                decoded?.managedApplications.first?.layout == expected,
+                "got \(String(describing: decoded?.managedApplications.first?.layout))"
+            )
+        }
+
         // Validation: a well-formed Layout passes; an empty span and an
         // out-of-bounds span are each rejected with the faulting axis.
         do {

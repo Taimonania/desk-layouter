@@ -1,17 +1,27 @@
 import CoreGraphics
 import Foundation
 
-/// How an axis of a Desktop's screen is divided when placing a window: into
-/// halves, thirds, or fourths. The raw value is the number of equal cells the
-/// axis is split into, so `cellCount` reads straight off it and the persisted
-/// JSON stores a plain `2`, `3`, or `4`.
+/// How an axis of a Desktop's usable area is divided when placing a window: not at
+/// all (full), or into halves, thirds, or fourths. The raw value is the number
+/// of equal cells the axis is split into, so `cellCount` reads straight off it
+/// and the persisted JSON stores a plain `1`, `2`, `3`, or `4`.
+///
+/// `full` is a single undivided cell covering the complete usable extent of the
+/// axis (no menu bar / Dock, no macOS native fullscreen). The cases are ordered
+/// full, halves, thirds, fourths — the order the editor offers them in — and
+/// `full`'s raw value `1` does not collide with the `2`/`3`/`4` written by
+/// Layouts persisted before Full existed, so those remain compatible.
 public enum Division: Int, Codable, Equatable, Sendable, CaseIterable {
+    case full = 1
     case halves = 2
     case thirds = 3
     case fourths = 4
 
     /// The number of equal cells this division splits its axis into.
     public var cellCount: Int { rawValue }
+
+    /// Whether this axis is a single undivided cell covering the whole axis.
+    public var isFull: Bool { self == .full }
 }
 
 /// An inclusive run of cells a window occupies on one axis, expressed as
@@ -42,10 +52,10 @@ public struct LayoutSpan: Codable, Equatable, Sendable {
     public var cellCount: Int { end - start + 1 }
 }
 
-/// Where a managed application's window sits on its Desktop's screen: the screen
-/// is divided horizontally and vertically (each into halves, thirds, or
-/// fourths), and the window occupies a column span and a row span of the
-/// resulting grid.
+/// Where a managed application's window sits on its Desktop's usable area: that
+/// area is divided horizontally and vertically (each full — undivided — or into
+/// halves, thirds, or fourths), and the window occupies a column span and a row
+/// span of the resulting grid.
 ///
 /// This is the persisted declarative desired state described in
 /// `docs/adr/0003-runtime-window-arrange-accessibility.md` and the **Layout**

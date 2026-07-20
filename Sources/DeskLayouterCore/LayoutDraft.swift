@@ -53,18 +53,28 @@ public struct LayoutDraft: Equatable, Sendable {
         )
     }
 
+    /// Whether the width is undivided (``Division/full``), so the editor offers
+    /// no first/last column choice for it.
+    public var isHorizontalFull: Bool { horizontalDivision.isFull }
+
+    /// Whether the height is undivided (``Division/full``), so the editor offers
+    /// no first/last row choice for it.
+    public var isVerticalFull: Bool { verticalDivision.isFull }
+
     // MARK: - Editing
 
     /// Changes how the width is divided, re-clamping the column span so it still
-    /// fits (a span that reached a now-removed column is pulled back to the last
-    /// remaining one).
+    /// fits. Because a Full axis holds only cell 0, switching a Full axis to a
+    /// divided one leaves the span on the leftmost column; a span that reached a
+    /// now-removed column is pulled back to the last remaining one.
     public mutating func setHorizontalDivision(_ division: Division) {
         horizontalDivision = division
         columnSpan = LayoutDraft.clamp(columnSpan, toCellCount: division.cellCount)
     }
 
     /// Changes how the height is divided, re-clamping the row span so it still
-    /// fits.
+    /// fits. Switching a Full axis to a divided one leaves the span on the top
+    /// row.
     public mutating func setVerticalDivision(_ division: Division) {
         verticalDivision = division
         rowSpan = LayoutDraft.clamp(rowSpan, toCellCount: division.cellCount)
