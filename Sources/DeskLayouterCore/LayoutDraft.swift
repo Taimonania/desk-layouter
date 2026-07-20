@@ -111,16 +111,16 @@ public struct LayoutDraft: Equatable, Sendable {
     /// same clamping and rectangle guarantees apply. On a Full axis the index
     /// clamps to that axis's single cell.
     public mutating func selectCell(column: Int, row: Int) {
-        selectRegion(fromColumn: column, fromRow: row, toColumn: column, toRow: row)
+        selectCells(fromColumn: column, fromRow: row, toColumn: column, toRow: row)
     }
 
-    /// Selects the inclusive rectangle spanned by two cells — the mini-grid
-    /// "press one cell and drag to another" gesture. The result is the same
-    /// whichever cell is the anchor and whichever is the cursor (drag direction
-    /// does not matter), it is always one continuous rectangle, and each endpoint
-    /// is clamped into its division, so an interaction that reports an
-    /// out-of-range cell (or lands on a Full axis) still yields a valid Layout.
-    public mutating func selectRegion(fromColumn: Int, fromRow: Int, toColumn: Int, toRow: Int) {
+    /// Selects the inclusive rectangle of cells spanned by two cells — the
+    /// mini-grid "press one cell and drag to another" gesture. The result is the
+    /// same whichever cell is the anchor and whichever is the cursor (drag
+    /// direction does not matter), it is always one continuous rectangle, and
+    /// each endpoint is clamped into its division, so an interaction that reports
+    /// an out-of-range cell (or lands on a Full axis) still yields a valid Layout.
+    public mutating func selectCells(fromColumn: Int, fromRow: Int, toColumn: Int, toRow: Int) {
         columnSpan = LayoutDraft.spanBetween(fromColumn, toColumn, cellCount: horizontalDivision.cellCount)
         rowSpan = LayoutDraft.spanBetween(fromRow, toRow, cellCount: verticalDivision.cellCount)
     }

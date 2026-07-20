@@ -219,7 +219,7 @@ struct LayoutDraftTestRunner {
                     rowSpan: .single(0)
                 )
             )
-            draft.selectRegion(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 2)
+            draft.selectCells(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 2)
             check("forward drag selects the inclusive column span",
                   draft.columnSpan == LayoutSpan(start: 1, end: 3), "got \(draft.columnSpan)")
             check("forward drag selects the inclusive row span",
@@ -235,8 +235,8 @@ struct LayoutDraftTestRunner {
                        columnSpan: .single(0), rowSpan: .single(0))
             )
             var reverse = forward
-            forward.selectRegion(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 2)
-            reverse.selectRegion(fromColumn: 3, fromRow: 2, toColumn: 1, toRow: 0)
+            forward.selectCells(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 2)
+            reverse.selectCells(fromColumn: 3, fromRow: 2, toColumn: 1, toRow: 0)
             check("reverse drag yields the same column span as forward",
                   forward.columnSpan == reverse.columnSpan,
                   "forward \(forward.columnSpan) reverse \(reverse.columnSpan)")
@@ -252,7 +252,7 @@ struct LayoutDraftTestRunner {
                 Layout(horizontalDivision: .halves, verticalDivision: .halves,
                        columnSpan: .single(0), rowSpan: .single(0))
             )
-            draft.selectRegion(fromColumn: -5, fromRow: 9, toColumn: 9, toRow: -5)
+            draft.selectCells(fromColumn: -5, fromRow: 9, toColumn: 9, toRow: -5)
             check("out-of-range drag endpoints clamp to a valid rectangle", draft.layout.isValid,
                   "got \(draft.layout)")
             check("clamped drag fills the whole halves×halves grid",
@@ -268,7 +268,7 @@ struct LayoutDraftTestRunner {
                 Layout(horizontalDivision: .full, verticalDivision: .thirds,
                        columnSpan: .single(0), rowSpan: .single(0))
             )
-            draft.selectRegion(fromColumn: 2, fromRow: 0, toColumn: 3, toRow: 2)
+            draft.selectCells(fromColumn: 2, fromRow: 0, toColumn: 3, toRow: 2)
             check("a Full axis stays on its single cell under drag",
                   draft.columnSpan == .single(0), "got \(draft.columnSpan)")
             check("the divided axis still takes the dragged span",
@@ -294,7 +294,7 @@ struct LayoutDraftTestRunner {
                 Layout(horizontalDivision: .fourths, verticalDivision: .halves,
                        columnSpan: .single(0), rowSpan: .single(0))
             )
-            draft.selectRegion(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 1)
+            draft.selectCells(fromColumn: 1, fromRow: 0, toColumn: 3, toRow: 1)
             check("controls read the selection's first/last column",
                   draft.columnSpan.start == 1 && draft.columnSpan.end == 3)
             check("controls read the selection's first/last row",
@@ -313,7 +313,7 @@ struct LayoutDraftTestRunner {
                 columnSpan: .single(0), rowSpan: LayoutSpan(start: 0, end: 1)
             )
             var draft = LayoutDraft(saved)
-            draft.selectRegion(fromColumn: 1, fromRow: 1, toColumn: 1, toRow: 1)
+            draft.selectCells(fromColumn: 1, fromRow: 1, toColumn: 1, toRow: 1)
             check("mutating the draft does not mutate the source Layout",
                   saved.columnSpan == .single(0) && saved.rowSpan == LayoutSpan(start: 0, end: 1),
                   "source changed to \(saved)")
@@ -321,6 +321,40 @@ struct LayoutDraftTestRunner {
                   draft.layout == Layout(horizontalDivision: .halves, verticalDivision: .halves,
                                          columnSpan: .single(1), rowSpan: .single(1)),
                   "got \(draft.layout)")
+        }
+
+        // Grid metrics — the pure pointer-offset → cell-index mapping the
+        // interactive preview drives. Pitch is cell + gap; a click near a cell's
+        // centre lands on that cell, and offsets before/after the grid clamp to
+        // the first/last cell so a drag past an edge still selects the edge cell.
+        do {
+            let metrics = LayoutGridMetrics(cellSize: 26, spacing: 2) // pitch 28
+            check("offset in the first cell maps to index 0",
+                  metrics.cellIndex(at: 13, cellCount: 4) == 0)
+            check("offset in the third cell maps to index 2",
+                  metrics.cellIndex(at: 2 * 28 + 13, cellCount: 4) == 2,
+                  "got \(metrics.cellIndex(at: 2 * 28 + 13, cellCount: 4))")
+            check("negative offset clamps to the first cell",
+                  metrics.cellIndex(at: -40, cellCount: 4) == 0)
+            check("offset past the grid clamps to the last cell",
+                  metrics.cellIndex(at: 9_999, cellCount: 4) == 3,
+                  "got \(metrics.cellIndex(at: 9_999, cellCount: 4))")
+            check("any offset on a Full axis (cellCount 1) maps to 0",
+                  metrics.cellIndex(at: 500, cellCount: 1) == 0)
+            check("cellPitch is cell size plus spacing", metrics.cellPitch == 28)
+        }
+
+        // Click path — a zero-length drag (start == current cell), the way the
+        // view routes a click, selects exactly that one cell on both axes.
+        do {
+            var draft = LayoutDraft(
+                Layout(horizontalDivision: .thirds, verticalDivision: .thirds,
+                       columnSpan: LayoutSpan(start: 0, end: 2), rowSpan: LayoutSpan(start: 0, end: 2))
+            )
+            draft.selectCells(fromColumn: 2, fromRow: 1, toColumn: 2, toRow: 1)
+            check("a zero-length drag selects the single clicked cell",
+                  draft.columnSpan == .single(2) && draft.rowSpan == .single(1),
+                  "cols \(draft.columnSpan) rows \(draft.rowSpan)")
         }
 
         if failures.isEmpty {

@@ -15,13 +15,7 @@ struct LayoutGridPreview: View {
             ForEach(0..<layout.verticalDivision.cellCount, id: \.self) { row in
                 HStack(spacing: spacing) {
                     ForEach(0..<layout.horizontalDivision.cellCount, id: \.self) { column in
-                        RoundedRectangle(cornerRadius: cellSize > 10 ? 3 : 1)
-                            .fill(
-                                layout.occupies(column: column, row: row)
-                                    ? Color.accentColor
-                                    : Color.secondary.opacity(0.22)
-                            )
-                            .frame(width: cellSize, height: cellSize)
+                        layoutGridCell(occupied: layout.occupies(column: column, row: row), cellSize: cellSize)
                     }
                 }
             }
@@ -30,11 +24,21 @@ struct LayoutGridPreview: View {
     }
 }
 
+/// The one mini-grid cell shape shared by the read-only ``LayoutGridPreview`` and
+/// the interactive ``InteractiveLayoutGrid``, so both paint cells identically and
+/// a change to cell appearance happens in one place.
+@ViewBuilder
+func layoutGridCell(occupied: Bool, cellSize: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: cellSize > 10 ? 3 : 1)
+        .fill(occupied ? Color.accentColor : Color.secondary.opacity(0.22))
+        .frame(width: cellSize, height: cellSize)
+}
+
 /// A direct-manipulation version of ``LayoutGridPreview`` bound to a
 /// ``LayoutDraft``: clicking a cell selects that single cell, and pressing on one
 /// cell and dragging to another selects the inclusive rectangle between them
 /// (either drag direction). Every selection routes through the draft's pure
-/// ``LayoutDraft/selectRegion(fromColumn:fromRow:toColumn:toRow:)`` seam, so it is
+/// ``LayoutDraft/selectCells(fromColumn:fromRow:toColumn:toRow:)`` seam, so it is
 /// always one continuous, valid rectangle and stays in lock-step with the
 /// first/last controls that bind to the same draft. Row 0 is the top, matching
 /// the on-screen orientation. Works for Full axes too — a Full axis resolves any
@@ -46,7 +50,7 @@ struct InteractiveLayoutGrid: View {
 
     private var columns: Int { draft.horizontalDivision.cellCount }
     private var rows: Int { draft.verticalDivision.cellCount }
-    private var stride: CGFloat { cellSize + spacing }
+    private var metrics: LayoutGridMetrics { LayoutGridMetrics(cellSize: cellSize, spacing: spacing) }
 
     var body: some View {
         VStack(spacing: spacing) {
@@ -62,44 +66,26 @@ struct InteractiveLayoutGrid: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    draft.selectRegion(
-                        fromColumn: columnIndex(at: value.startLocation.x),
-                        fromRow: rowIndex(at: value.startLocation.y),
-                        toColumn: columnIndex(at: value.location.x),
-                        toRow: rowIndex(at: value.location.y)
+                    draft.selectCells(
+                        fromColumn: metrics.cellIndex(at: value.startLocation.x, cellCount: columns),
+                        fromRow: metrics.cellIndex(at: value.startLocation.y, cellCount: rows),
+                        toColumn: metrics.cellIndex(at: value.location.x, cellCount: columns),
+                        toRow: metrics.cellIndex(at: value.location.y, cellCount: rows)
                     )
                 }
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Layout region")
+        .accessibilityLabel("Layout grid")
     }
 
     private func cell(column: Int, row: Int) -> some View {
         let occupied = draft.isCellOccupied(column: column, row: row)
-        return RoundedRectangle(cornerRadius: cellSize > 10 ? 3 : 1)
-            .fill(occupied ? Color.accentColor : Color.secondary.opacity(0.22))
-            .frame(width: cellSize, height: cellSize)
+        return layoutGridCell(occupied: occupied, cellSize: cellSize)
             .accessibilityElement()
             .accessibilityLabel("Column \(column + 1) of \(columns), row \(row + 1) of \(rows)")
             .accessibilityAddTraits(occupied ? [.isButton, .isSelected] : .isButton)
             .accessibilityHint("Selects this cell")
             .accessibilityAction { draft.selectCell(column: column, row: row) }
-    }
-
-    /// Maps a horizontal offset within the grid to a 0-based column, clamped into
-    /// range. The draft's selection seam clamps too; clamping here keeps the
-    /// reported cell honest so a drag that strays past an edge selects the edge
-    /// cell rather than nothing.
-    private func columnIndex(at x: CGFloat) -> Int {
-        clampIndex(Int((x / stride).rounded(.down)), count: columns)
-    }
-
-    private func rowIndex(at y: CGFloat) -> Int {
-        clampIndex(Int((y / stride).rounded(.down)), count: rows)
-    }
-
-    private func clampIndex(_ index: Int, count: Int) -> Int {
-        min(max(index, 0), max(count - 1, 0))
     }
 }
 
