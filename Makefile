@@ -22,6 +22,7 @@ test:
 	swift run DeskLayouterReconcilerTests
 	swift run DeskLayouterAdapterFailureTests
 	swift run DeskLayouterDisplayTests
+	swift run DeskLayouterArrangeTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh
