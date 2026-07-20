@@ -344,7 +344,8 @@ final class EditorModel: ObservableObject {
 
         feedback = arrangeFeedback(
             for: report,
-            armedDesktopCount: arrangePlan.armedDesktops.count
+            activeDesktop: activeDesktop,
+            pendingDesktops: Array(arrangePlan.armedDesktops)
         )
     }
 
@@ -369,26 +370,40 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    /// Builds the feedback after an Arrange pass: it names how many windows moved,
-    /// explains that any armed Desktops are arranged on first visit, and — the key
-    /// signal — lists any windows that resisted the move so they are never dropped
-    /// silently (issue #27 acceptance criteria).
-    private func arrangeFeedback(for report: ArrangeReport, armedDesktopCount: Int) -> EditorFeedback {
-        var message = report.arranged.isEmpty
-            ? "Arranged this Desktop — no windows needed moving."
-            : "Arranged \(report.arranged.count) ^[window](inflect: true) on this Desktop."
-        if armedDesktopCount > 0 {
-            message += " \(armedDesktopCount) other ^[Desktop](inflect: true) with a Layout will be arranged the first time you visit ^[it](inflect: true)."
+    /// Builds the feedback after an Arrange pass: it names the affected
+    /// application display names and the numbered active Desktop, names any
+    /// Desktops still armed for their first visit, names applications skipped for
+    /// having no available window, and — as a distinct error — names any windows
+    /// that refused to move or resize (issue #34 acceptance criteria). The pure
+    /// wording lives in `ArrangeReportPresenter`; this only maps the engine's
+    /// bundle identifiers to display names and threads the presenter's tone into
+    /// the view's success/failure styling.
+    private func arrangeFeedback(
+        for report: ArrangeReport,
+        activeDesktop: Int?,
+        pendingDesktops: [Int]
+    ) -> EditorFeedback {
+        let displayNames = Dictionary(
+            board.configuration.managedApplications.map { ($0.bundleIdentifier, $0.displayName) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        func displayName(for bundleIdentifier: String) -> String {
+            displayNames[bundleIdentifier] ?? bundleIdentifier
         }
-        if report.hasResistance {
-            let names = report.resisted
-                .map(\.displayName)
-                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            message += " These windows resisted being moved (fixed-size, fullscreen, or a sheet): "
-                + names.joined(separator: ", ") + "."
-            return .failure(message)
+
+        let announcement = ArrangeReportPresenter.announce(
+            activeDesktop: activeDesktop,
+            arranged: report.arranged.map(displayName(for:)),
+            skipped: report.skipped.map(displayName(for:)),
+            resisted: report.resisted.map(\.displayName),
+            pendingDesktops: pendingDesktops
+        )
+        switch announcement.tone {
+        case .success:
+            return .success(announcement.message)
+        case .failure:
+            return .failure(announcement.message)
         }
-        return .success(message)
     }
 
     /// Starts observing Space changes so an armed Desktop is arranged the first
@@ -426,7 +441,11 @@ final class EditorModel: ObservableObject {
             return
         case let .arrange(tearDownAfter):
             if let report = runArrange(board.configuration.managedApplications) {
-                feedback = arrangeFeedback(for: report, armedDesktopCount: arrangePlan.armedDesktops.count)
+                feedback = arrangeFeedback(
+                    for: report,
+                    activeDesktop: activeDesktop,
+                    pendingDesktops: Array(arrangePlan.armedDesktops)
+                )
             }
             if tearDownAfter {
                 stopObservingSpaceChanges()

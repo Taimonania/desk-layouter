@@ -25,6 +25,7 @@ test:
 	swift run DeskLayouterDisplayTests
 	swift run DeskLayouterArrangeTests
 	swift run DeskLayouterArrangePlanTests
+	swift run DeskLayouterArrangeReportTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh
