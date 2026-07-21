@@ -162,6 +162,91 @@ struct PresetTestRunner {
             check("a library document without presets decodes as empty", empty == PresetLibrary(), "got \(String(describing: empty))")
         }
 
+        // Dirty-relative-to-Preset detection: the switching-protection safeguard
+        // keys off whether the complete working board (managed apps, Assignments,
+        // Layouts) still matches the selected Preset. This is distinct from pending
+        // Assignments awaiting Apply.
+        do {
+            let layout = Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0))
+            let base = [
+                app("Writer", "com.example.Writer", desktop: 1, layout: layout),
+                app("Reader", "com.example.Reader", desktop: 2),
+            ]
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: base)
+
+            func config(_ apps: [ManagedApplication]) -> DeskLayouterConfiguration {
+                DeskLayouterConfiguration(managedApplications: apps)
+            }
+
+            check(
+                "an unchanged working copy is not modified relative to its Preset",
+                library.isModified(config(base), from: work.id) == false
+            )
+            check(
+                "a reordered working copy is not modified (order is not semantic)",
+                library.isModified(config(base.reversed()), from: work.id) == false
+            )
+            check(
+                "pendingRemovals alone do not count as a Preset modification",
+                library.isModified(
+                    DeskLayouterConfiguration(managedApplications: base, pendingRemovals: ["com.example.Gone"]),
+                    from: work.id
+                ) == false
+            )
+            check(
+                "an Assignment-only change is detected as modified",
+                library.isModified(
+                    config([app("Writer", "com.example.Writer", desktop: 1, layout: layout), app("Reader", "com.example.Reader", desktop: 3)]),
+                    from: work.id
+                )
+            )
+            check(
+                "a Layout-only change is detected as modified",
+                library.isModified(
+                    config([app("Writer", "com.example.Writer", desktop: 1), app("Reader", "com.example.Reader", desktop: 2)]),
+                    from: work.id
+                )
+            )
+            check(
+                "adding an application is detected as modified",
+                library.isModified(
+                    config(base + [app("Mail", "com.example.Mail", desktop: 1)]),
+                    from: work.id
+                )
+            )
+            check(
+                "removing an application is detected as modified",
+                library.isModified(config([base[0]]), from: work.id)
+            )
+            check(
+                "a nil selection (Custom Setup) is never modified relative to a Preset",
+                library.isModified(config(base), from: nil) == false
+            )
+            check(
+                "a dangling selection (Custom Setup) is never modified relative to a Preset",
+                library.isModified(config(base), from: UUID()) == false
+            )
+        }
+
+        // Empty boards: an empty working copy matches an empty Preset, and adding
+        // to an empty Preset is a modification.
+        do {
+            var library = PresetLibrary()
+            let empty = try! library.add(name: "Empty", managedApplications: [])
+            check(
+                "an empty working copy matches an empty Preset",
+                library.isModified(DeskLayouterConfiguration(), from: empty.id) == false
+            )
+            check(
+                "populating an empty Preset's working copy is a modification",
+                library.isModified(
+                    DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 1)]),
+                    from: empty.id
+                )
+            )
+        }
+
         if failures.isEmpty {
             print("Preset tests passed")
         } else {

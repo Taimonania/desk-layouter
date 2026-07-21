@@ -25,6 +25,17 @@ enum EditorFeedback: Equatable {
     }
 }
 
+/// The pending choice presented when the user selects another Preset while the
+/// working copy has unsaved changes to the current one. Drives the protective
+/// "Update and Switch" / "Discard and Switch" / "Cancel" prompt.
+struct PendingPresetSwitch: Identifiable, Equatable {
+    let targetID: UUID
+    let targetName: String
+    let currentPresetName: String
+
+    var id: UUID { targetID }
+}
+
 @MainActor
 final class EditorModel: ObservableObject {
     // Add-flow inputs (the searchable installed-app picker plus the chosen
@@ -46,6 +57,7 @@ final class EditorModel: ObservableObject {
     // copy's current selected-Preset association (nil reads as "Custom Setup").
     @Published private(set) var presets: [Preset] = []
     @Published private(set) var selectedPresetID: UUID?
+    @Published var pendingPresetSwitch: PendingPresetSwitch?
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
@@ -523,6 +535,83 @@ final class EditorModel: ObservableObject {
         } catch {
             return "Could not save the Preset: \(error.localizedDescription)"
         }
+    }
+
+    /// Entry point for choosing a Preset from the selector. When the working copy
+    /// still matches the selected Preset (or none is selected) it loads the target
+    /// immediately; when the working copy has been modified it opens the protective
+    /// three-way prompt instead of silently overwriting or discarding work.
+    /// Re-selecting the already-selected Preset is a no-op, so a checkmarked row
+    /// can never silently discard the working copy.
+    func selectPreset(id: UUID) {
+        guard id != selectedPresetID, presetLibrary.preset(for: id) != nil else { return }
+        switch PresetSwitch.decide(
+            target: id,
+            currentSelection: selectedPresetID,
+            configuration: board.configuration,
+            library: presetLibrary
+        ) {
+        case .switchImmediately:
+            loadPreset(id: id)
+        case let .confirm(currentPresetName):
+            pendingPresetSwitch = PendingPresetSwitch(
+                targetID: id,
+                targetName: presetLibrary.preset(for: id)?.name ?? "",
+                currentPresetName: currentPresetName
+            )
+        }
+    }
+
+    /// "Update and Switch": stores the working board in the current Preset, then
+    /// loads the requested one. A persistence failure prevents the switch and
+    /// reports the error, leaving both the working copy and the stored Preset intact.
+    func confirmUpdateAndSwitch() {
+        guard
+            let pending = pendingPresetSwitch,
+            let currentID = selectedPresetID,
+            let current = presetLibrary.preset(for: currentID)
+        else {
+            pendingPresetSwitch = nil
+            return
+        }
+        do {
+            let result = try PresetSwitch.updateAndSwitch(
+                target: pending.targetID,
+                currentSelection: currentID,
+                library: presetLibrary,
+                board: board,
+                persist: { try presetLibraryStore.save($0) }
+            )
+            presetLibrary = result.library
+            board = result.board
+            selectedPresetID = board.selectedPresetID
+            refreshPresets()
+            pendingPresetSwitch = nil
+            do {
+                try boardStateStore.save(board)
+                refreshProjection()
+                feedback = .success("Updated Preset \"\(current.name)\" and switched to \"\(pending.targetName)\".")
+            } catch {
+                refreshProjection()
+                feedback = .failure("Updated Preset \"\(current.name)\" and switched, but could not store the board: \(error.localizedDescription)")
+            }
+        } catch {
+            pendingPresetSwitch = nil
+            feedback = .failure("Could not update Preset \"\(current.name)\": \(error.localizedDescription). Nothing was switched.")
+        }
+    }
+
+    /// "Discard and Switch": loads the requested Preset over the working copy,
+    /// leaving the stored current Preset unchanged.
+    func confirmDiscardAndSwitch() {
+        guard let pending = pendingPresetSwitch else { return }
+        pendingPresetSwitch = nil
+        loadPreset(id: pending.targetID)
+    }
+
+    /// "Cancel": dismisses the prompt, preserving the working copy and selection.
+    func cancelPresetSwitch() {
+        pendingPresetSwitch = nil
     }
 
     /// Loads the Preset with the given identity as the working copy: it swaps in
