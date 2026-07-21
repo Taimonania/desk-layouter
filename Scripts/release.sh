@@ -319,10 +319,16 @@ do_verify_available() {
     local_sha=$(manifest_field dmg_sha256)
 
     print "verify-available: release $tag on $repo must be published, tagged latest, downloadable..."
-    local latest
-    latest=$(gh release view "$tag" --repo "$repo" --json isLatest -q '.isLatest' 2>/dev/null) \
+    # Assert the release exists and is a real (non-draft, non-prerelease) publish.
+    # `gh release view` has no isLatest field, so "flagged latest" is asserted
+    # separately against GitHub's computed latest-release endpoint.
+    local flags
+    flags=$(gh release view "$tag" --repo "$repo" --json isDraft,isPrerelease -q '"\(.isDraft) \(.isPrerelease)"' 2>/dev/null) \
         || die "release $tag is not published on $repo (run 'publish' first)"
-    [[ "$latest" == "true" ]] || die "release $tag is not flagged latest"
+    [[ "$flags" == "false false" ]] || die "release $tag is a draft or prerelease ($flags)"
+    local latest_tag
+    latest_tag=$(gh api "repos/$repo/releases/latest" -q '.tag_name' 2>/dev/null || true)
+    [[ "$latest_tag" == "$tag" ]] || die "release $tag is not the latest release (latest is '${latest_tag:-none}')"
 
     local urls
     urls=$(gh release view "$tag" --repo "$repo" --json assets -q '.assets[].url')
@@ -343,7 +349,6 @@ do_verify_available() {
     print "verify-available: downloaded checksum must match the local artifact..."
     local tmp remote_sha
     tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT INT TERM
     curl -sL -o "$tmp/asset.dmg" \
         "$(printf '%s\n' "$urls" | grep -i '\.dmg' | head -n1)" || true
     if [[ -s "$tmp/asset.dmg" ]]; then
