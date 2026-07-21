@@ -1,5 +1,6 @@
 .PHONY: build run relaunch test test-desktop-placement \
-	session-boundary-arm session-boundary-verify session-boundary-restore
+	session-boundary-arm session-boundary-verify session-boundary-restore \
+	release release-preflight verify-release
 
 build:
 	./Scripts/build-app.sh
@@ -43,3 +44,18 @@ session-boundary-verify:
 
 session-boundary-restore:
 	./Scripts/verify-session-boundary.sh restore
+
+# Release pipeline (issue #44). `release-preflight` checks tools + credentials
+# and publishes nothing. `release` builds → signs → notarizes → staples locally;
+# it publishes to GitHub Releases only when RELEASE_PUBLISH=1. `verify-release`
+# asserts the local artifact and, once published, its public availability.
+# Manual prerequisites (Developer ID cert, notary credential, create-dmg) are
+# documented in docs/releasing.md.
+release-preflight:
+	./Scripts/release.sh preflight
+
+release:
+	./Scripts/release.sh all
+
+verify-release:
+	./Scripts/release.sh verify
