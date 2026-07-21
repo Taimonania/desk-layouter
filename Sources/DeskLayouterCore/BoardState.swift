@@ -16,16 +16,28 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
     /// visually and to seed the Layout editor with the app's current Layout.
     public let layout: Layout?
 
+    /// Whether this card's application is present in the live installed-app
+    /// catalog. `false` marks a managed application that is not currently
+    /// installed (issue #52): its Assignment stays visible and stored with its
+    /// display name, is clearly flagged unavailable in the UI, and remains
+    /// declarative data that takes effect again if the app is reinstalled — it is
+    /// never removed on refresh, Apply, or relaunch, and never by itself disables
+    /// Apply. Defaults to `true` so callers that do not track installation status
+    /// (the plain ``BoardState/columns(desktopCount:)`` projection) are unaffected.
+    public let isApplicationAvailable: Bool
+
     public init(
         bundleIdentifier: String,
         displayName: String,
         desktopNumber: Int,
-        layout: Layout? = nil
+        layout: Layout? = nil,
+        isApplicationAvailable: Bool = true
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
         self.desktopNumber = desktopNumber
         self.layout = layout
+        self.isApplicationAvailable = isApplicationAvailable
     }
 
     /// Whether this app has a Layout — the flag the board reads to show apps that

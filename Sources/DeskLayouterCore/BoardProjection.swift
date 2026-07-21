@@ -1,0 +1,132 @@
+import Foundation
+
+/// A grouped section of cards whose Assignments target a Desktop that does not
+/// currently exist — a Desktop number beyond the live Desktop count (issue #52).
+///
+/// The board surfaces one section per distinct unavailable Desktop number, under
+/// a clearly labeled header such as "Unavailable Desktop 3", so these Assignments
+/// stay visible and recoverable rather than being silently dropped, hidden, or
+/// clamped. Each card keeps its application identity and optional Layout and can
+/// be moved to an available Desktop through the same move controls as any card.
+public struct UnavailableDesktopSection: Equatable, Sendable, Identifiable {
+    /// The 1-based Desktop number the Assignments target, which no longer exists.
+    public let desktopNumber: Int
+
+    /// The cards assigned to this unavailable Desktop, in managed order.
+    public let cards: [BoardCard]
+
+    public init(desktopNumber: Int, cards: [BoardCard]) {
+        self.desktopNumber = desktopNumber
+        self.cards = cards
+    }
+
+    public var id: Int { desktopNumber }
+
+    /// The number of Assignments stranded on this unavailable Desktop.
+    public var assignmentCount: Int { cards.count }
+
+    /// The section header shown to the user, e.g. "Unavailable Desktop 3".
+    public var title: String { "Unavailable Desktop \(desktopNumber)" }
+}
+
+/// The availability-aware projection of a board against the live system: the
+/// Assignments that land on Desktops that currently exist, and — kept separate
+/// but equally visible — the Assignments stranded on Desktops that do not
+/// (issue #52).
+///
+/// This is a pure value computed at projection time from the working
+/// configuration, the live Desktop count, and the live installed-app set; no
+/// availability is ever stored in a Preset. Recomputing it after a Desktop
+/// returns or an app is reinstalled surfaces those entries as available again
+/// without recreating any Preset entry.
+public struct BoardProjection: Equatable, Sendable {
+    /// One column per Desktop that currently exists (Desktop 1, 2, …), in
+    /// positional order. Cards here may still carry an unavailable *application*
+    /// (`BoardCard.isApplicationAvailable == false`); that is flagged on the card
+    /// and never blocks Apply.
+    public let availableColumns: [DesktopColumn]
+
+    /// Sections for Assignments whose Desktop no longer exists, one per distinct
+    /// unavailable Desktop number, ascending. Empty when every Assignment targets
+    /// a Desktop that exists.
+    public let unavailableDesktops: [UnavailableDesktopSection]
+
+    public init(
+        availableColumns: [DesktopColumn],
+        unavailableDesktops: [UnavailableDesktopSection]
+    ) {
+        self.availableColumns = availableColumns
+        self.unavailableDesktops = unavailableDesktops
+    }
+
+    /// True when at least one Assignment targets a Desktop that does not exist, so
+    /// the UI must surface the unavailable sections and Apply must be disabled
+    /// until they are moved to an available Desktop. Missing *applications* never
+    /// set this — only missing Desktops do.
+    public var hasUnavailableDesktopAssignments: Bool { !unavailableDesktops.isEmpty }
+
+    /// The unavailable Desktop numbers present, ascending, for explanatory
+    /// feedback that names exactly what the user must fix.
+    public var unavailableDesktopNumbers: [Int] { unavailableDesktops.map(\.desktopNumber) }
+}
+
+public extension BoardState {
+    /// Projects the working configuration into the available Desktop columns plus
+    /// the sections for Assignments stranded on Desktops that no longer exist,
+    /// annotating each card with whether its application is currently installed
+    /// (issue #52).
+    ///
+    /// Unlike ``columns(desktopCount:)``, which omits out-of-range cards entirely,
+    /// this preserves and surfaces every Assignment: cards whose Desktop number is
+    /// outside `1...desktopCount` are grouped into ``BoardProjection/unavailableDesktops``
+    /// instead of vanishing, and cards whose application is absent from
+    /// `installedBundleIdentifiers` are kept with `isApplicationAvailable == false`.
+    /// Projecting never mutates the configuration, so refreshing against a changed
+    /// system can only change what is *shown*, never what is *stored*.
+    ///
+    /// With no Desktops (`desktopCount <= 0`, e.g. a display could not be resolved)
+    /// the board has no columns and no unavailable sections — the same no-columns
+    /// state ``columns(desktopCount:)`` produces; that is a display-resolution
+    /// concern handled elsewhere, and the Assignments remain intact in the stored
+    /// configuration regardless.
+    func projection(
+        desktopCount: Int,
+        installedBundleIdentifiers: Set<String>
+    ) -> BoardProjection {
+        guard desktopCount > 0 else {
+            return BoardProjection(availableColumns: [], unavailableDesktops: [])
+        }
+
+        func card(for application: ManagedApplication) -> BoardCard {
+            BoardCard(
+                bundleIdentifier: application.bundleIdentifier,
+                displayName: application.displayName,
+                desktopNumber: application.desktopNumber,
+                layout: application.layout,
+                isApplicationAvailable: installedBundleIdentifiers.contains(application.bundleIdentifier)
+            )
+        }
+
+        let availableRange = 1...desktopCount
+        var cardsByAvailableDesktop: [Int: [BoardCard]] = [:]
+        var cardsByUnavailableDesktop: [Int: [BoardCard]] = [:]
+        for application in configuration.managedApplications {
+            if availableRange.contains(application.desktopNumber) {
+                cardsByAvailableDesktop[application.desktopNumber, default: []].append(card(for: application))
+            } else {
+                cardsByUnavailableDesktop[application.desktopNumber, default: []].append(card(for: application))
+            }
+        }
+
+        let availableColumns = availableRange.map { number in
+            DesktopColumn(number: number, cards: cardsByAvailableDesktop[number] ?? [])
+        }
+        let unavailableDesktops = cardsByUnavailableDesktop.keys.sorted().map { number in
+            UnavailableDesktopSection(desktopNumber: number, cards: cardsByUnavailableDesktop[number] ?? [])
+        }
+        return BoardProjection(
+            availableColumns: availableColumns,
+            unavailableDesktops: unavailableDesktops
+        )
+    }
+}

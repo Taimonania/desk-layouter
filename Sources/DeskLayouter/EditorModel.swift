@@ -58,6 +58,11 @@ final class EditorModel: ObservableObject {
 
     // Board projection + pending state.
     @Published private(set) var columns: [DesktopColumn] = []
+    // Assignments stranded on Desktops that no longer exist, surfaced as their own
+    // labeled sections so they stay visible and recoverable rather than being
+    // dropped (issue #52). Empty when every Assignment targets a Desktop that
+    // exists.
+    @Published private(set) var unavailableDesktops: [UnavailableDesktopSection] = []
     @Published private(set) var desktopCount = 0
     @Published private(set) var pendingChangeCount = 0
     @Published private(set) var feedback: EditorFeedback = .none
@@ -85,6 +90,12 @@ final class EditorModel: ObservableObject {
     // the app is never a permanent background observer.
     private var arrangePlan = DesktopArrangePlan()
     private var spaceChangeObserver: NSObjectProtocol?
+
+    /// The latest availability-aware projection of the board against the live
+    /// system (issue #52). Core owns the surfacing and Apply-gating rules; this
+    /// model stores the projection and reads its computed facts rather than
+    /// re-deriving them, so "what blocks Apply" lives in exactly one place.
+    private var boardProjection = BoardProjection(availableColumns: [], unavailableDesktops: [])
 
     init(
         assignmentPlanner: AssignmentPlanner = AssignmentPlanner(),
@@ -134,7 +145,29 @@ final class EditorModel: ObservableObject {
     /// Display, or multiple extended Displays) — pending edits are kept, but they
     /// cannot be written until the topology is a single Display again
     /// (issue #18, ACs 5–6).
-    var canApply: Bool { board.isDirty && desktopCount > 0 }
+    ///
+    /// Apply is additionally disabled while any Assignment targets a Desktop that
+    /// does not currently exist (issue #52): writing then would silently drop
+    /// those stranded Assignments, so the user must first move them to an
+    /// available Desktop. Missing *applications* never disable Apply — their
+    /// bundle identifiers stay declarative data that takes effect if reinstalled.
+    var canApply: Bool { board.isDirty && desktopCount > 0 && !hasUnavailableDesktopAssignments }
+
+    /// True when at least one Assignment targets a Desktop that no longer exists,
+    /// so the board shows the unavailable sections and Apply is blocked. Reads the
+    /// Core projection's rule directly — the single source of truth.
+    var hasUnavailableDesktopAssignments: Bool { boardProjection.hasUnavailableDesktopAssignments }
+
+    /// Explanatory feedback shown beside Apply while it is blocked by unavailable
+    /// Desktops, naming exactly which Desktops must be cleared so the user knows
+    /// what to fix. `nil` when Apply is not blocked for this reason.
+    var applyBlockedExplanation: String? {
+        guard hasUnavailableDesktopAssignments else { return nil }
+        let numbers = boardProjection.unavailableDesktopNumbers
+        let list = numbers.map(String.init).joined(separator: ", ")
+        let desktopNoun = numbers.count == 1 ? "Desktop" : "Desktops"
+        return "Apply is disabled: move every app off unavailable \(desktopNoun) \(list) to a Desktop that exists. Nothing is dropped — your Assignments stay until you move them."
+    }
 
     /// True when at least one managed app carries a valid Layout, so Arrange has
     /// something to enact. Deliberately independent of ``canApply``: setting a
@@ -241,14 +274,20 @@ final class EditorModel: ObservableObject {
 
     /// Moves a card one Desktop left (`-1`) or right (`+1`) for keyboard-only
     /// operation, clamped to the Desktops that exist.
+    ///
+    /// The current Desktop is read from the working configuration — the single
+    /// source of truth — not from the projected available `columns`, so a card
+    /// stranded on a Desktop that no longer exists (issue #52) can still be moved
+    /// off it with the keyboard. Clamping the target into `1...desktopCount` means
+    /// an edge card is a harmless no-op as before, while a stranded card is
+    /// brought back onto the nearest Desktop that exists.
     func moveCard(bundleIdentifier: String, by offset: Int) {
-        guard let current = columns
-            .first(where: { $0.cards.contains { $0.bundleIdentifier == bundleIdentifier } })
+        guard desktopCount > 0,
+              let application = board.configuration.managedApplication(for: bundleIdentifier)
         else {
             return
         }
-        let target = current.number + offset
-        guard (1...max(desktopCount, 1)).contains(target) else { return }
+        let target = min(max(application.desktopNumber + offset, 1), desktopCount)
         move(bundleIdentifier: bundleIdentifier, toDesktop: target)
     }
 
@@ -284,6 +323,14 @@ final class EditorModel: ObservableObject {
     func apply() {
         guard board.isDirty else {
             feedback = .info("No changes to apply.")
+            return
+        }
+        // Refuse to Apply while any Assignment is stranded on a Desktop that no
+        // longer exists: writing now would skip those bindings and delete their
+        // owned keys, silently dropping the Assignments (issue #52). Keep them and
+        // tell the user what to move instead.
+        if let explanation = applyBlockedExplanation {
+            feedback = .info(explanation)
             return
         }
         do {
@@ -812,7 +859,12 @@ final class EditorModel: ObservableObject {
     }
 
     private func refreshProjection() {
-        columns = board.columns(desktopCount: desktopCount)
+        boardProjection = board.projection(
+            desktopCount: desktopCount,
+            installedBundleIdentifiers: Set(applications.map(\.bundleIdentifier))
+        )
+        columns = boardProjection.availableColumns
+        unavailableDesktops = boardProjection.unavailableDesktops
         pendingChangeCount = board.pendingChangeCount
     }
 }
