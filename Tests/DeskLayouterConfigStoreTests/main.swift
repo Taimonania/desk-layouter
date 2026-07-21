@@ -393,6 +393,102 @@ struct ConfigStoreTestRunner {
             try? FileManager.default.removeItem(at: directory)
         }
 
+        // Preset library store, missing file: loading before any Preset is saved
+        // yields an empty library rather than an error, so a fresh install starts
+        // with no Presets (and the board shows "Custom Setup").
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let store = PresetLibraryStore(fileURL: directory.appendingPathComponent("presets.json"))
+            let loaded = try? store.load()
+            check("loading a missing Preset library yields an empty library", loaded == PresetLibrary(), "got \(String(describing: loaded))")
+        }
+
+        // Preset library store, relaunch restoration: saving a library and loading
+        // it back returns an identical library, so saved Presets and their captured
+        // Layouts survive quitting and relaunching.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let fileURL = directory.appendingPathComponent("presets.json")
+            let store = PresetLibraryStore(fileURL: fileURL)
+            var library = PresetLibrary()
+            let layout = Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0))
+            _ = try? library.add(name: "Work", managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.Writer", displayName: "Writer", desktopNumber: 1, layout: layout),
+            ])
+            _ = try? library.add(name: "Play", managedApplications: [])
+
+            var reloaded: PresetLibrary?
+            var wroteToDisk = false
+            do {
+                try store.save(library)
+                wroteToDisk = FileManager.default.fileExists(atPath: fileURL.path)
+                reloaded = try store.load()
+            } catch {
+                reloaded = nil
+            }
+            check("save writes the Preset library file to disk", wroteToDisk)
+            check("Preset library save then load round-trips through the filesystem", reloaded == library, "got \(String(describing: reloaded))")
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        // Preset library store, tolerant of a damaged file: a partial document
+        // decodes to an empty library rather than throwing, so a corrupt Presets
+        // file never blocks launch or destroys the working board.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileURL = directory.appendingPathComponent("presets.json")
+            try? Data("{}".utf8).write(to: fileURL)
+            let store = PresetLibraryStore(fileURL: fileURL)
+            let loaded = try? store.load()
+            check("a partial Preset library file decodes as empty", loaded == PresetLibrary(), "got \(String(describing: loaded))")
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        // Board state store, selected-Preset association: the working copy's
+        // selected-Preset association survives quitting and relaunching.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            let store = BoardStateStore(fileURL: directory.appendingPathComponent("board-state.json"))
+            let presetID = UUID()
+            var board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
+                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+            ]))
+            board.associateSelectedPreset(presetID)
+
+            var reloaded: BoardState?
+            do {
+                try store.save(board)
+                reloaded = try store.load()
+            } catch {
+                reloaded = nil
+            }
+            check("the selected-Preset association survives relaunch", reloaded?.selectedPresetID == presetID, "got \(String(describing: reloaded?.selectedPresetID))")
+            check("a relaunched board with an association is not dirtied by it", reloaded?.isDirty == false)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        // Board state store, migration keeps Custom Setup: an existing board-state
+        // file written before Presets existed loads with no selected Preset (shown
+        // as "Custom Setup"), and no Preset is created for it.
+        do {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileURL = directory.appendingPathComponent("board-state.json")
+            let legacyBoardJSON = Data(#"{"configuration":{"managedApplications":[{"bundleIdentifier":"com.example.A","displayName":"A","desktopNumber":1}]},"appliedBaseline":{"com.example.A":1}}"#.utf8)
+            try? legacyBoardJSON.write(to: fileURL)
+            let store = BoardStateStore(fileURL: fileURL)
+            let loaded = try? store.load()
+            check("a pre-Presets board migrates with no selected Preset", loaded?.selectedPresetID == nil)
+            check("a migrated pre-Presets board loads clean", loaded?.isDirty == false)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
         if failures.isEmpty {
             print("Config store tests passed")
         } else {

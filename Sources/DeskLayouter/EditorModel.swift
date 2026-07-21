@@ -42,12 +42,19 @@ final class EditorModel: ObservableObject {
     @Published private(set) var pendingChangeCount = 0
     @Published private(set) var feedback: EditorFeedback = .none
 
+    // Presets: the ordered library shown in the header selector, and the working
+    // copy's current selected-Preset association (nil reads as "Custom Setup").
+    @Published private(set) var presets: [Preset] = []
+    @Published private(set) var selectedPresetID: UUID?
+
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
     private let boardStateStore: BoardStateStore
+    private let presetLibraryStore: PresetLibraryStore
     private let applicationsProvider: any InstalledApplicationsProviding
     private let windowArranger: WindowArranger
     private var board: BoardState
+    private var presetLibrary: PresetLibrary
     private var selectedApplication: SelectedApplication?
 
     // Runtime Arrange state (issue #27, ADR-0003). The pure arming policy lives in
@@ -61,12 +68,14 @@ final class EditorModel: ObservableObject {
         assignmentPlanner: AssignmentPlanner = AssignmentPlanner(),
         spacesAdapter: any SpacesAdapter = MacOSSpacesAdapter(),
         boardStateStore: BoardStateStore = .default,
+        presetLibraryStore: PresetLibraryStore = .default,
         applicationsProvider: any InstalledApplicationsProviding = SystemInstalledApplicationsProvider(),
         windowArranger: WindowArranger = WindowArranger()
     ) {
         self.assignmentPlanner = assignmentPlanner
         self.spacesAdapter = spacesAdapter
         self.boardStateStore = boardStateStore
+        self.presetLibraryStore = presetLibraryStore
         self.applicationsProvider = applicationsProvider
         self.windowArranger = windowArranger
         // Load the saved board state so the editor reflects both the previously
@@ -74,6 +83,11 @@ final class EditorModel: ObservableObject {
         // missing file loads as an empty board; a read failure falls back to
         // empty rather than blocking launch.
         board = (try? boardStateStore.load()) ?? BoardState()
+        // Load the saved Presets. A missing file, or a read failure, degrades to
+        // an empty library rather than blocking launch — the board is unaffected.
+        presetLibrary = (try? presetLibraryStore.load()) ?? PresetLibrary()
+        selectedPresetID = board.selectedPresetID
+        refreshPresets()
         refreshProjection()
     }
 
@@ -451,6 +465,110 @@ final class EditorModel: ObservableObject {
                 stopObservingSpaceChanges()
             }
         }
+    }
+
+    // MARK: - Presets
+
+    /// The name to show for the current Preset selection in the header: the
+    /// selected Preset's name, or "Custom Setup" when the working copy is not tied
+    /// to any saved Preset (a fresh or migrated board).
+    var presetSelectionName: String {
+        PresetSelection.displayName(for: selectedPresetID, in: presetLibrary)
+    }
+
+    /// True when a Preset is selected, so the explicit "Update Preset" action has
+    /// a target. With no selection there is nothing to update — the user saves a
+    /// new Preset instead.
+    var canUpdateSelectedPreset: Bool {
+        selectedPresetID.flatMap { presetLibrary.preset(for: $0) } != nil
+    }
+
+    /// Saves the current working board as a new Preset under the given name,
+    /// capturing every managed application, its Assignment, and its optional
+    /// Layout — including an empty board. The name is validated (non-empty and
+    /// unique ignoring capitalization); an invalid name produces inline feedback
+    /// and replaces nothing. On success the working copy is associated with the
+    /// new Preset and both files are persisted. This never Applies or Arranges.
+    func saveCurrentBoardAsPreset(named name: String) {
+        do {
+            // Validate and add against a copy so a disk-write failure cannot leave
+            // the in-memory library ahead of what is stored.
+            var updatedLibrary = presetLibrary
+            let created = try updatedLibrary.add(
+                name: name,
+                managedApplications: board.configuration.managedApplications
+            )
+            try presetLibraryStore.save(updatedLibrary)
+            presetLibrary = updatedLibrary
+            board.associateSelectedPreset(created.id)
+            selectedPresetID = created.id
+            do {
+                try boardStateStore.save(board)
+            } catch {
+                feedback = .failure("Saved the Preset, but could not store the board: \(error.localizedDescription)")
+                refreshPresets()
+                return
+            }
+            refreshPresets()
+            feedback = .success("Saved Preset \"\(created.name)\".")
+        } catch let error as PresetNameError {
+            feedback = .failure(presetNameErrorMessage(error))
+        } catch {
+            feedback = .failure("Could not save the Preset: \(error.localizedDescription)")
+        }
+    }
+
+    /// Loads the Preset with the given identity as the working copy: it swaps in
+    /// the Preset's complete board while preserving the true last-applied baseline,
+    /// and records the selected-Preset association. Loading changes only the
+    /// working board — it never Applies to macOS or Arranges windows. The board is
+    /// persisted so the working copy and its association survive relaunch.
+    func loadPreset(id: UUID) {
+        guard let preset = presetLibrary.preset(for: id) else { return }
+        board.load(configuration: preset.configuration, selectedPresetID: preset.id)
+        selectedPresetID = preset.id
+        do {
+            try boardStateStore.save(board)
+            refreshProjection()
+            feedback = .info("Loaded Preset \"\(preset.name)\". Apply or Arrange when you're ready — loading changed only this board.")
+        } catch {
+            feedback = .failure("Could not store the board: \(error.localizedDescription)")
+        }
+    }
+
+    /// Updates the selected Preset to match the current working board, capturing
+    /// its managed applications, Assignments, and Layouts. This is the only action
+    /// that changes a stored Preset — editing a loaded working copy leaves the
+    /// Preset untouched until the user asks for this. With no Preset selected there
+    /// is nothing to update.
+    func updateSelectedPreset() {
+        guard let id = selectedPresetID, let existing = presetLibrary.preset(for: id) else {
+            feedback = .info("Select a Preset to update, or save the board as a new Preset.")
+            return
+        }
+        var updatedLibrary = presetLibrary
+        updatedLibrary.update(id: id, managedApplications: board.configuration.managedApplications)
+        do {
+            try presetLibraryStore.save(updatedLibrary)
+            presetLibrary = updatedLibrary
+            refreshPresets()
+            feedback = .success("Updated Preset \"\(existing.name)\".")
+        } catch {
+            feedback = .failure("Could not update the Preset: \(error.localizedDescription)")
+        }
+    }
+
+    private func presetNameErrorMessage(_ error: PresetNameError) -> String {
+        switch error {
+        case .empty:
+            "Enter a name for the Preset."
+        case let .duplicate(existingName):
+            "A Preset named \"\(existingName)\" already exists. Choose a different name."
+        }
+    }
+
+    private func refreshPresets() {
+        presets = presetLibrary.orderedPresets
     }
 
     /// Applies a transition to the board and persists it, but only when it

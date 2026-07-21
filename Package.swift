@@ -22,6 +22,7 @@ let package = Package(
                 "DisplayResolution.swift",
                 "ConfigurationStore.swift",
                 "BoardStateStore.swift",
+                "PresetLibraryStore.swift",
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
                 "DesktopArrangePlan.swift",
@@ -37,6 +38,7 @@ let package = Package(
                 "DisplayResolution.swift",
                 "ConfigurationStore.swift",
                 "BoardStateStore.swift",
+                "PresetLibraryStore.swift",
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
                 "DesktopArrangePlan.swift",
@@ -52,6 +54,11 @@ let package = Package(
             name: "DeskLayouterBoardTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterBoardTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterPresetTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterPresetTests"
         ),
         .executableTarget(
             name: "DeskLayouterLayoutTests",
