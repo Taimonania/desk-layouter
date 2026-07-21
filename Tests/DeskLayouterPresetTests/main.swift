@@ -247,6 +247,118 @@ struct PresetTestRunner {
             )
         }
 
+        // Rename: succeeds, preserves the complete stored snapshot (identity and
+        // captured board), and reuses the exact creation validation — non-empty,
+        // trimmed, case-insensitive uniqueness.
+        do {
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: [app("A", "com.example.A", desktop: 1, layout: Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0)))])
+            let renamed = try? library.rename(id: work.id, to: "  Focus  ")
+            check("rename returns the renamed Preset", renamed?.name == "Focus", "got \(String(describing: renamed?.name))")
+            check("rename keeps the Preset identity", library.preset(for: work.id)?.id == work.id)
+            check(
+                "rename preserves the complete stored snapshot",
+                library.preset(for: work.id)?.managedApplications == work.managedApplications,
+                "got \(String(describing: library.preset(for: work.id)?.managedApplications))"
+            )
+            check("rename applies the new name", library.preset(for: work.id)?.name == "Focus")
+        }
+
+        // Rename, recapitalization: a Preset can be renamed to a different
+        // capitalization of its own name — it does not collide with itself.
+        do {
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: [])
+            let renamed = try? library.rename(id: work.id, to: "WORK")
+            check("a Preset can be recapitalized without colliding with itself", renamed?.name == "WORK", "got \(String(describing: renamed?.name))")
+        }
+
+        // Rename, empty: an empty or whitespace-only name is rejected and the
+        // Preset keeps its old name.
+        do {
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: [])
+            var thrown: PresetNameError?
+            do { _ = try library.rename(id: work.id, to: "   ") }
+            catch let error as PresetNameError { thrown = error }
+            catch {}
+            check("renaming to an empty name is rejected as empty", thrown == .empty, "got \(String(describing: thrown))")
+            check("a rejected empty rename keeps the old name", library.preset(for: work.id)?.name == "Work")
+        }
+
+        // Rename, duplicate: renaming onto another Preset's name (ignoring
+        // capitalization) is rejected and neither Preset changes.
+        do {
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: [app("A", "com.example.A", desktop: 1)])
+            let play = try! library.add(name: "Play", managedApplications: [app("B", "com.example.B", desktop: 2)])
+            var thrown: PresetNameError?
+            do { _ = try library.rename(id: play.id, to: "WORK") }
+            catch let error as PresetNameError { thrown = error }
+            catch {}
+            check("renaming onto another Preset's name is rejected as duplicate", thrown == .duplicate(existingName: "Work"), "got \(String(describing: thrown))")
+            check("a rejected duplicate rename leaves the renamed Preset unchanged", library.preset(for: play.id)?.name == "Play")
+            check("a rejected duplicate rename leaves the collided Preset unchanged", library.preset(for: work.id)?.name == "Work")
+        }
+
+        // Rename, unknown id: validates the name first, then no-ops (nil) for an
+        // id no longer in the library, changing nothing.
+        do {
+            var library = PresetLibrary()
+            _ = try! library.add(name: "Work", managedApplications: [])
+            let before = library
+            let renamed = try? library.rename(id: UUID(), to: "Ghost")
+            check("renaming an unknown id returns nil", renamed == nil)
+            check("renaming an unknown id changes nothing", library == before)
+        }
+
+        // Delete: removes only the named Preset and returns it; other Presets
+        // remain untouched.
+        do {
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: [app("A", "com.example.A", desktop: 1)])
+            let play = try! library.add(name: "Play", managedApplications: [app("B", "com.example.B", desktop: 2)])
+            let removed = library.delete(id: work.id)
+            check("delete returns the removed Preset", removed?.id == work.id)
+            check("delete removes the Preset from the library", library.preset(for: work.id) == nil)
+            check("delete leaves other Presets untouched", library.orderedPresets.map(\.name) == ["Play"], "got \(library.orderedPresets.map(\.name))")
+            check("delete leaves the other Preset's board intact", library.preset(for: play.id)?.managedApplications.map(\.bundleIdentifier) == ["com.example.B"])
+        }
+
+        // Delete, unknown id: deleting an id no longer in the library is a no-op
+        // returning nil.
+        do {
+            var library = PresetLibrary()
+            _ = try! library.add(name: "Work", managedApplications: [])
+            let before = library
+            let removed = library.delete(id: UUID())
+            check("deleting an unknown id returns nil", removed == nil)
+            check("deleting an unknown id changes nothing", library == before)
+        }
+
+        // Delete to empty: deleting the last Preset yields an empty library that
+        // still round-trips (relaunch persistence of an empty library).
+        do {
+            var library = PresetLibrary()
+            let only = try! library.add(name: "Only", managedApplications: [])
+            _ = library.delete(id: only.id)
+            check("deleting the last Preset empties the library", library.presets.isEmpty)
+            let decoded = try? PresetLibrarySerialization.decode(from: PresetLibrarySerialization.encode(library))
+            check("an emptied library round-trips through serialization", decoded == PresetLibrary(), "got \(String(describing: decoded))")
+        }
+
+        // Relaunch persistence of a rename/delete: the mutated library survives a
+        // serialization round-trip with names and snapshots intact.
+        do {
+            var library = PresetLibrary()
+            let work = try! library.add(name: "Work", managedApplications: [app("A", "com.example.A", desktop: 1)])
+            _ = try! library.add(name: "Play", managedApplications: [app("B", "com.example.B", desktop: 2)])
+            _ = try! library.rename(id: work.id, to: "Focus")
+            let decoded = try? PresetLibrarySerialization.decode(from: PresetLibrarySerialization.encode(library))
+            check("a renamed library survives serialization", decoded?.preset(for: work.id)?.name == "Focus", "got \(String(describing: decoded?.preset(for: work.id)?.name))")
+            check("a renamed Preset keeps its snapshot across serialization", decoded?.preset(for: work.id)?.managedApplications.map(\.bundleIdentifier) == ["com.example.A"])
+        }
+
         if failures.isEmpty {
             print("Preset tests passed")
         } else {

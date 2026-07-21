@@ -36,6 +36,15 @@ struct PendingPresetSwitch: Identifiable, Equatable {
     var id: UUID { targetID }
 }
 
+/// The pending confirmation shown before a Preset is deleted. Carries the
+/// Preset's name so the confirmation can name exactly what will be deleted.
+struct PendingPresetDeletion: Identifiable, Equatable {
+    let presetID: UUID
+    let presetName: String
+
+    var id: UUID { presetID }
+}
+
 @MainActor
 final class EditorModel: ObservableObject {
     // Add-flow inputs (the searchable installed-app picker plus the chosen
@@ -58,6 +67,7 @@ final class EditorModel: ObservableObject {
     @Published private(set) var presets: [Preset] = []
     @Published private(set) var selectedPresetID: UUID?
     @Published var pendingPresetSwitch: PendingPresetSwitch?
+    @Published var pendingPresetDeletion: PendingPresetDeletion?
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
@@ -495,6 +505,16 @@ final class EditorModel: ObservableObject {
         selectedPresetID.flatMap { presetLibrary.preset(for: $0) } != nil
     }
 
+    /// True when a resolvable Preset is selected, so the header's Rename action has
+    /// a target. With no selection (a Custom Setup working copy) there is nothing
+    /// to rename.
+    var canRenameSelectedPreset: Bool { canUpdateSelectedPreset }
+
+    /// True when a resolvable Preset is selected, so the header's Delete action has
+    /// a target. Deleting operates on the selected Preset; a Custom Setup working
+    /// copy has no saved Preset to delete.
+    var canDeleteSelectedPreset: Bool { canUpdateSelectedPreset }
+
     /// Saves the current working board as a new Preset under the given name,
     /// capturing every managed application, its Assignment, and its optional
     /// Layout — including an empty board. The name is validated (non-empty and
@@ -652,6 +672,104 @@ final class EditorModel: ObservableObject {
         } catch {
             feedback = .failure("Could not update the Preset: \(error.localizedDescription)")
         }
+    }
+
+    /// Renames the selected Preset, reusing the same validation as Preset creation
+    /// (non-empty, case-insensitive uniqueness) and preserving its complete stored
+    /// snapshot. Returns `nil` on success (the caller dismisses its rename prompt),
+    /// or a clear error message to show inline so the user can correct the name in
+    /// place. The rename is persisted before it is committed in memory, so a disk
+    /// failure never loses the Preset. This never Applies or Arranges and never
+    /// touches the working board — the association is by identity.
+    @discardableResult
+    func renameSelectedPreset(to name: String) -> String? {
+        guard let id = selectedPresetID, presetLibrary.preset(for: id) != nil else {
+            return "Select a Preset to rename."
+        }
+        do {
+            presetLibrary = try PresetEditing.rename(
+                id: id,
+                to: name,
+                library: presetLibrary,
+                persist: { try presetLibraryStore.save($0) }
+            )
+            refreshPresets()
+            let newName = presetLibrary.preset(for: id)?.name ?? name
+            feedback = .success("Renamed the Preset to \"\(newName)\".")
+            return nil
+        } catch let error as PresetNameError {
+            return presetNameErrorMessage(error)
+        } catch {
+            return "Could not rename the Preset: \(error.localizedDescription)"
+        }
+    }
+
+    /// Opens the delete confirmation for the selected Preset, naming exactly what
+    /// will be deleted. Deleting is never immediate — it always routes through this
+    /// explicit confirmation. With no Preset selected there is nothing to delete.
+    func requestDeleteSelectedPreset() {
+        guard let id = selectedPresetID, let preset = presetLibrary.preset(for: id) else {
+            feedback = .info("Select a Preset to delete.")
+            return
+        }
+        pendingPresetDeletion = PendingPresetDeletion(
+            presetID: id,
+            presetName: preset.name
+        )
+    }
+
+    /// Performs the confirmed deletion. The stored library is written with the
+    /// Preset removed before the change is committed in memory, so a disk failure
+    /// prevents the delete and reports it, losing neither the Preset nor the
+    /// working board. Deleting the selected Preset preserves its loaded working
+    /// board and re-labels it "Custom Setup"; deleting an unselected Preset leaves
+    /// the working board and selection unchanged. This never Applies or Arranges
+    /// and never alters the applied baseline.
+    func confirmDeletePreset() {
+        guard let pending = pendingPresetDeletion, let existing = presetLibrary.preset(for: pending.presetID) else {
+            pendingPresetDeletion = nil
+            return
+        }
+        let wasSelected = selectedPresetID == pending.presetID
+        do {
+            let result = try PresetEditing.delete(
+                id: pending.presetID,
+                currentSelection: selectedPresetID,
+                library: presetLibrary,
+                board: board,
+                persist: { try presetLibraryStore.save($0) }
+            )
+            presetLibrary = result.library
+            board = result.board
+            selectedPresetID = board.selectedPresetID
+            refreshPresets()
+            pendingPresetDeletion = nil
+            guard wasSelected else {
+                feedback = .success("Deleted Preset \"\(existing.name)\".")
+                return
+            }
+            // The board's association changed to Custom Setup; persist it so the
+            // change survives relaunch. The delete itself already succeeded, so a
+            // board-write failure is reported but does not undo it — the working
+            // board is intact in memory and its on-disk association resolves to
+            // Custom Setup either way now that the Preset is gone.
+            do {
+                try boardStateStore.save(board)
+                refreshProjection()
+                feedback = .success("Deleted Preset \"\(existing.name)\". This board is now Custom Setup.")
+            } catch {
+                refreshProjection()
+                feedback = .failure("Deleted Preset \"\(existing.name)\", but could not store the board: \(error.localizedDescription)")
+            }
+        } catch {
+            pendingPresetDeletion = nil
+            feedback = .failure("Could not delete Preset \"\(existing.name)\": \(error.localizedDescription). Nothing was deleted.")
+        }
+    }
+
+    /// Dismisses the delete confirmation without deleting anything.
+    func cancelPresetDeletion() {
+        pendingPresetDeletion = nil
     }
 
     private func presetNameErrorMessage(_ error: PresetNameError) -> String {

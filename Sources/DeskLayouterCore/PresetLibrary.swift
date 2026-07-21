@@ -58,10 +58,29 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
     }
 
     /// Whether a name is already taken, ignoring capitalization and surrounding
-    /// whitespace. Returns the existing Preset whose name collides, if any.
-    private func existingPreset(named name: String) -> Preset? {
+    /// whitespace. Returns the existing Preset whose name collides, if any. The
+    /// Preset identified by `excluding` is ignored, so renaming a Preset to a new
+    /// capitalization of its own name never collides with itself.
+    private func existingPreset(named name: String, excluding id: Preset.ID? = nil) -> Preset? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return presets.first { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
+        return presets.first {
+            $0.id != id && $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    /// The single naming gate shared by creation (``add(name:managedApplications:id:)``)
+    /// and rename (``rename(id:to:)``): trims surrounding whitespace, rejects an
+    /// empty name with ``PresetNameError/empty`` and a case-insensitive collision
+    /// with ``PresetNameError/duplicate(existingName:)``, and returns the trimmed
+    /// name to store. `excluding` omits one Preset from the uniqueness check so a
+    /// Preset can be renamed to a different capitalization of its own name.
+    private func validatedName(_ name: String, excluding id: Preset.ID? = nil) throws -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw PresetNameError.empty }
+        if let existing = existingPreset(named: trimmed, excluding: id) {
+            throw PresetNameError.duplicate(existingName: existing.name)
+        }
+        return trimmed
     }
 
     /// Adds a new Preset capturing the given managed applications under the given
@@ -80,14 +99,41 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
         managedApplications: [ManagedApplication],
         id: UUID = UUID()
     ) throws -> Preset {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw PresetNameError.empty }
-        if let existing = existingPreset(named: trimmed) {
-            throw PresetNameError.duplicate(existingName: existing.name)
-        }
+        let trimmed = try validatedName(name)
         let preset = Preset(id: id, name: trimmed, managedApplications: managedApplications)
         presets.append(preset)
         return preset
+    }
+
+    /// Renames the Preset with the given identity, preserving its complete stored
+    /// snapshot (identity and captured managed applications) and changing only its
+    /// name.
+    ///
+    /// The new name goes through the same gate as creation: it is trimmed and
+    /// validated for non-emptiness and case-insensitive uniqueness (the Preset
+    /// being renamed is excluded from the uniqueness check, so recapitalizing its
+    /// own name is allowed). On a rejected name the library is left unchanged, so a
+    /// failed rename never silently loses or replaces a Preset. Renaming a Preset
+    /// that is no longer in the library is a harmless no-op — but the name is still
+    /// validated first, matching creation. Returns the renamed Preset, or `nil`
+    /// when the identity is unknown.
+    @discardableResult
+    public mutating func rename(id: Preset.ID, to newName: String) throws -> Preset? {
+        let trimmed = try validatedName(newName, excluding: id)
+        guard let index = presets.firstIndex(where: { $0.id == id }) else { return nil }
+        presets[index].name = trimmed
+        return presets[index]
+    }
+
+    /// Removes the Preset with the given identity from the library, leaving every
+    /// other Preset untouched. Deleting a Preset that is no longer in the library
+    /// is a harmless no-op. Returns the removed Preset, or `nil` when the identity
+    /// is unknown. This concerns Preset storage only — it never touches the working
+    /// board's selected-Preset association, which the caller reconciles.
+    @discardableResult
+    public mutating func delete(id: Preset.ID) -> Preset? {
+        guard let index = presets.firstIndex(where: { $0.id == id }) else { return nil }
+        return presets.remove(at: index)
     }
 
     /// Replaces the managed applications of the Preset with the given identity,
