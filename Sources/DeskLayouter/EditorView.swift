@@ -17,6 +17,9 @@ struct EditorView: View {
     @State private var showingSavePresetSheet = false
     @State private var newPresetName = ""
     @State private var savePresetError: String?
+    @State private var showingRenamePresetSheet = false
+    @State private var renamePresetName = ""
+    @State private var renamePresetError: String?
 
     private static let boardPadding: CGFloat = 20
 
@@ -66,6 +69,32 @@ struct EditorView: View {
         }
         .sheet(isPresented: $showingSavePresetSheet) {
             savePresetSheet
+        }
+        .sheet(isPresented: $showingRenamePresetSheet) {
+            renamePresetSheet
+        }
+        .confirmationDialog(
+            presetDeletionTitle,
+            isPresented: Binding(
+                get: { model.pendingPresetDeletion != nil },
+                set: { presenting in if !presenting { model.cancelPresetDeletion() } }
+            ),
+            titleVisibility: .visible,
+            presenting: model.pendingPresetDeletion
+        ) { pending in
+            Button("Delete Preset", role: .destructive) {
+                model.confirmDeletePreset()
+            }
+            .keyboardShortcut(.defaultAction)
+            .accessibilityLabel("Delete Preset \(pending.presetName)")
+
+            Button("Cancel", role: .cancel) {
+                model.cancelPresetDeletion()
+            }
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Cancel deleting Preset \(pending.presetName)")
+        } message: { pending in
+            Text(presetDeletionMessage(for: pending))
         }
         .confirmationDialog(
             presetSwitchTitle,
@@ -191,8 +220,41 @@ struct EditorView: View {
             .help("Update the selected Preset to match the current board")
             .accessibilityLabel("Update the selected Preset")
 
+            Button {
+                renamePresetName = model.presetSelectionName
+                renamePresetError = nil
+                showingRenamePresetSheet = true
+            } label: {
+                Label("Rename Preset…", systemImage: "pencil")
+            }
+            .disabled(!model.canRenameSelectedPreset)
+            .help("Rename the selected Preset. This never Applies or Arranges.")
+            .accessibilityLabel("Rename the selected Preset")
+
+            Button(role: .destructive) {
+                model.requestDeleteSelectedPreset()
+            } label: {
+                Label("Delete Preset…", systemImage: "trash")
+            }
+            .disabled(!model.canDeleteSelectedPreset)
+            .help("Delete the selected Preset. Your working board is kept as Custom Setup.")
+            .accessibilityLabel("Delete the selected Preset")
+
             Spacer(minLength: 0)
         }
+    }
+
+    private var presetDeletionTitle: String {
+        if let pending = model.pendingPresetDeletion {
+            return "Delete the Preset \"\(pending.presetName)\"?"
+        }
+        return "Delete this Preset?"
+    }
+
+    private func presetDeletionMessage(for pending: PendingPresetDeletion) -> String {
+        // The header only ever deletes the selected Preset, so the working board
+        // is kept as "Custom Setup". Nothing is Applied or Arranged.
+        "This removes the saved Preset \"\(pending.presetName)\". Your current board is kept as \"Custom Setup\" — nothing is Applied or Arranged, and no windows move."
     }
 
     private var presetSwitchTitle: String {
@@ -253,6 +315,60 @@ struct EditorView: View {
             savePresetError = error
         } else {
             showingSavePresetSheet = false
+        }
+    }
+
+    private var renamePresetSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Preset")
+                .font(.headline)
+            Text("Changes only the Preset's name and keeps everything it captured. It does not Apply or Arrange.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Preset name", text: $renamePresetName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("New Preset name")
+                .onSubmit(commitRenamePreset)
+                .onChange(of: renamePresetName) { _ in renamePresetError = nil }
+            if let renamePresetError {
+                Text(renamePresetError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Error: \(renamePresetError)")
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) {
+                    showingRenamePresetSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Rename") {
+                    commitRenamePreset()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(renamePresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    /// Renames the selected Preset. On success the sheet dismisses; on a rejected
+    /// name (empty or a case-insensitive duplicate) the error is shown inline and
+    /// the sheet stays open with the typed name intact, so a rejected name never
+    /// silently replaces another Preset or loses this one.
+    private func commitRenamePreset() {
+        let name = renamePresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            renamePresetError = "Enter a name for the Preset."
+            return
+        }
+        if let error = model.renameSelectedPreset(to: name) {
+            renamePresetError = error
+        } else {
+            showingRenamePresetSheet = false
         }
     }
 
