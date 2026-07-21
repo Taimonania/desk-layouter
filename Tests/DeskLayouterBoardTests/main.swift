@@ -274,6 +274,119 @@ struct BoardStateTestRunner {
             check("a legacy .app card keeps its raw stored name", card?.displayName == "Safari.app", "got \(String(describing: card?.displayName))")
         }
 
+        // Load, baseline preservation: loading a Preset's board keeps the true
+        // last-applied baseline, so pending changes reflect differences from what
+        // macOS last received — not differences from whatever board was loaded
+        // before. Loading never enacts anything itself.
+        do {
+            // macOS last received {A→1}. The user then edits the working copy to
+            // {A→3} (unapplied), so the baseline is still {A:1}.
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("A", "com.example.A", desktop: 1),
+                ])
+            )
+            board.move(bundleIdentifier: "com.example.A", toDesktop: 3)
+            check("baseline is preserved after editing", board.appliedBaseline == ["com.example.A": 1], "got \(board.appliedBaseline)")
+
+            // Load a Preset assigning {A→2}. Pending must be measured against the
+            // applied baseline {A:1}, not the previously loaded {A→3}.
+            let preset = DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 2)])
+            let presetID = UUID()
+            board.load(configuration: preset, selectedPresetID: presetID)
+            check("loading swaps in the Preset's working configuration", board.columns(desktopCount: 3)[1].cards.map(\.bundleIdentifier) == ["com.example.A"], "got \(board.columns(desktopCount: 3))")
+            check("loading preserves the applied baseline", board.appliedBaseline == ["com.example.A": 1], "got \(board.appliedBaseline)")
+            check("pending reflects difference from what macOS last received", board.pendingChanges == ["com.example.A"], "got \(board.pendingChanges)")
+            check("loading records the selected Preset association", board.selectedPresetID == presetID)
+        }
+
+        // Load, clean when matching the baseline: loading a Preset whose board
+        // matches exactly what macOS last received yields a clean board — Apply
+        // has nothing to do.
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("A", "com.example.A", desktop: 1),
+                ])
+            )
+            board.assign(app("B", "com.example.B", desktop: 2))
+            board.load(
+                configuration: DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 1)]),
+                selectedPresetID: UUID()
+            )
+            check("loading a board equal to the baseline is clean", board.isDirty == false, "got \(board.pendingChanges)")
+        }
+
+        // Load, removed-app deletion: an application macOS last received that the
+        // loaded board no longer manages is remembered as a pending removal, so the
+        // next Apply deletes its owned key rather than leaving a stale macOS binding.
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("A", "com.example.A", desktop: 1),
+                    app("B", "com.example.B", desktop: 2),
+                ])
+            )
+            board.load(
+                configuration: DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 1)]),
+                selectedPresetID: UUID()
+            )
+            check("a de-managed applied app is a pending change", board.pendingChanges == ["com.example.B"], "got \(board.pendingChanges)")
+            check("a de-managed applied app stays owned for deletion on Apply", board.configuration.ownedBundleIdentifiers.contains("com.example.B"))
+        }
+
+        // Load, no auto-apply then Apply cleans: after loading, the board is dirty
+        // but nothing was enacted; a subsequent markApplied advances the baseline to
+        // the loaded board and clears the seeded removals.
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("A", "com.example.A", desktop: 1),
+                ])
+            )
+            board.load(
+                configuration: DeskLayouterConfiguration(managedApplications: [app("C", "com.example.C", desktop: 2)]),
+                selectedPresetID: UUID()
+            )
+            check("loading leaves pending work but enacts nothing on its own", board.isDirty)
+            board.markApplied()
+            check("Apply after load advances the baseline to the loaded board", board.appliedBaseline == ["com.example.C": 2], "got \(board.appliedBaseline)")
+            check("Apply after load clears the seeded removals", board.configuration.pendingRemovals.isEmpty)
+        }
+
+        // Association and persistence: the selected-Preset association is set by
+        // associate, survives serialization, and a document written before Presets
+        // existed decodes with no association (shown as "Custom Setup").
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 1)])
+            )
+            let id = UUID()
+            board.associateSelectedPreset(id)
+            check("associating a Preset does not dirty the board", board.isDirty == false)
+            let decoded = try? BoardStateSerialization.decode(from: BoardStateSerialization.encode(board))
+            check("the selected-Preset association round-trips", decoded?.selectedPresetID == id, "got \(String(describing: decoded?.selectedPresetID))")
+
+            let legacyJSON = Data(#"{"configuration":{"managedApplications":[{"bundleIdentifier":"com.example.A","displayName":"A","desktopNumber":1}]},"appliedBaseline":{"com.example.A":1}}"#.utf8)
+            let legacy = try? BoardStateSerialization.decode(from: legacyJSON)
+            check("a board written before Presets has no selected Preset", legacy?.selectedPresetID == nil)
+        }
+
+        // Editing keeps the association: editing a loaded working copy leaves the
+        // selected-Preset association intact — the stored Preset only changes when
+        // the user explicitly updates it (handled outside this pure model).
+        do {
+            var board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 1)])
+            )
+            let id = UUID()
+            board.associateSelectedPreset(id)
+            board.move(bundleIdentifier: "com.example.A", toDesktop: 2)
+            board.assign(app("B", "com.example.B", desktop: 1))
+            board.remove(bundleIdentifier: "com.example.B")
+            check("editing a loaded working copy keeps its Preset association", board.selectedPresetID == id)
+        }
+
         if failures.isEmpty {
             print("Board state tests passed")
         } else {

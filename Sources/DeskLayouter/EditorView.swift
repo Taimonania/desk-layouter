@@ -14,6 +14,9 @@ struct EditorView: View {
     @State private var searchFieldWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
     @State private var editingLayoutCard: BoardCard?
+    @State private var showingSavePresetSheet = false
+    @State private var newPresetName = ""
+    @State private var savePresetError: String?
 
     private static let boardPadding: CGFloat = 20
 
@@ -22,6 +25,11 @@ struct EditorView: View {
             VStack(alignment: .leading, spacing: 16) {
                 // Fixed header — always visible, never clipped by a scroll.
                 header
+
+                // Preset bar: choose/load a Preset, save the board as a new one,
+                // or explicitly update the selected one. Loading only swaps the
+                // working board — Apply and Arrange stay separate, explicit actions.
+                presetBar
 
                 // Search-to-add control row: type to filter installed apps; the
                 // results panel floats over the board just below (see the ZStack).
@@ -55,6 +63,9 @@ struct EditorView: View {
         .frame(minWidth: 760, minHeight: 640)
         .sheet(item: $editingLayoutCard) { card in
             LayoutEditorView(model: model, card: currentCard(for: card) ?? card)
+        }
+        .sheet(isPresented: $showingSavePresetSheet) {
+            savePresetSheet
         }
         .onPreferenceChange(SearchFieldWidthKey.self) { searchFieldWidth = $0 }
         .onAppear { model.refresh() }
@@ -100,6 +111,113 @@ struct EditorView: View {
             .keyboardShortcut("q", modifiers: .command)
             .help("Quit Desk Layouter")
             .accessibilityLabel("Quit Desk Layouter")
+        }
+    }
+
+    // MARK: - Presets
+
+    private var presetBar: some View {
+        HStack(spacing: 10) {
+            Text("Preset")
+                .foregroundStyle(.secondary)
+            Menu {
+                if model.presets.isEmpty {
+                    Text("No Presets yet")
+                } else {
+                    ForEach(model.presets) { preset in
+                        Button {
+                            model.loadPreset(id: preset.id)
+                        } label: {
+                            if preset.id == model.selectedPresetID {
+                                Label(preset.name, systemImage: "checkmark")
+                            } else {
+                                Text(preset.name)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(model.presetSelectionName)
+                    .frame(minWidth: 120, alignment: .leading)
+            }
+            .frame(width: 220)
+            .help("Load a saved Preset as a working copy. Loading never Applies or Arranges.")
+            .accessibilityLabel("Preset selector, currently \(model.presetSelectionName)")
+
+            Button {
+                newPresetName = ""
+                savePresetError = nil
+                showingSavePresetSheet = true
+            } label: {
+                Label("Save as Preset…", systemImage: "square.and.arrow.down")
+            }
+            .help("Save the current board as a new Preset")
+            .accessibilityLabel("Save the current board as a new Preset")
+
+            Button {
+                model.updateSelectedPreset()
+            } label: {
+                Label("Update Preset", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(!model.canUpdateSelectedPreset)
+            .help("Update the selected Preset to match the current board")
+            .accessibilityLabel("Update the selected Preset")
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var savePresetSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Save as Preset")
+                .font(.headline)
+            Text("Captures every application on the board with its Assignment and Layout. It does not Apply or Arrange.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Preset name", text: $newPresetName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Preset name")
+                .onSubmit(commitSavePreset)
+                .onChange(of: newPresetName) { _ in savePresetError = nil }
+            if let savePresetError {
+                Text(savePresetError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Error: \(savePresetError)")
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) {
+                    showingSavePresetSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    commitSavePreset()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    /// Saves the board as a Preset. On success the sheet dismisses; on a rejected
+    /// name (empty or a case-insensitive duplicate) the error is shown inline and
+    /// the sheet stays open with the typed name intact, so a rejected name never
+    /// silently replaces another Preset.
+    private func commitSavePreset() {
+        let name = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            savePresetError = "Enter a name for the Preset."
+            return
+        }
+        if let error = model.saveCurrentBoardAsPreset(named: name) {
+            savePresetError = error
+        } else {
+            showingSavePresetSheet = false
         }
     }
 

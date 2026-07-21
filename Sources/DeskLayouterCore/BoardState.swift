@@ -89,26 +89,39 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// relaunching Desk Layouter.
     public private(set) var appliedBaseline: [String: Int]
 
+    /// The identity of the ``Preset`` this working copy was loaded from (or saved
+    /// as), or `nil` when the working copy is not tied to any saved Preset — a
+    /// board that has never been saved, or a migrated existing installation, which
+    /// the editor header shows as "Custom Setup". It is persisted so the working
+    /// copy's selected-Preset association survives quitting and relaunching, and
+    /// editing the working copy never clears it — the Preset itself only changes
+    /// when the user explicitly updates it.
+    public private(set) var selectedPresetID: UUID?
+
     /// Creates a board state. When no explicit baseline is supplied the working
     /// configuration is treated as already applied (clean), which is the correct
     /// default both for a brand-new empty configuration and for migrating a
     /// previously saved configuration that predates pending-state tracking.
     public init(
         configuration: DeskLayouterConfiguration = DeskLayouterConfiguration(),
-        appliedBaseline: [String: Int]? = nil
+        appliedBaseline: [String: Int]? = nil,
+        selectedPresetID: UUID? = nil
     ) {
         self.configuration = configuration
         self.appliedBaseline = appliedBaseline ?? BoardState.baseline(from: configuration)
+        self.selectedPresetID = selectedPresetID
     }
 
     private enum CodingKeys: String, CodingKey {
         case configuration
         case appliedBaseline
+        case selectedPresetID
     }
 
     // Tolerant decoding: a persisted state written before pending-state tracking
     // (or hand-authored without a baseline) loads as clean rather than falsely
-    // dirty.
+    // dirty, and one written before Presets existed loads with no selected Preset
+    // (shown as "Custom Setup") — the migration path for existing installations.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let configuration = try container.decode(
@@ -120,6 +133,7 @@ public struct BoardState: Codable, Equatable, Sendable {
             [String: Int].self,
             forKey: .appliedBaseline
         ) ?? BoardState.baseline(from: configuration)
+        selectedPresetID = try container.decodeIfPresent(UUID.self, forKey: .selectedPresetID)
     }
 
     // MARK: - Column projection
@@ -233,6 +247,39 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// key.
     public mutating func remove(bundleIdentifier: String) {
         configuration.remove(bundleIdentifier: bundleIdentifier)
+    }
+
+    /// Loads a Preset's board as the working copy, associating the working copy
+    /// with that Preset.
+    ///
+    /// Loading changes *only* the working board — it never Applies to macOS or
+    /// Arranges windows. Crucially it preserves the true last-applied baseline
+    /// rather than resetting it, so pending-change counts and Apply state reflect
+    /// differences from what macOS last received, not differences from whatever
+    /// board was loaded before. Any application macOS last received that the
+    /// loaded board no longer manages is seeded as a pending removal, so the next
+    /// Apply deletes its owned key exactly as a manual removal would — only the
+    /// snapshot's managed applications are taken from the input; any incoming
+    /// pending state is ignored.
+    public mutating func load(
+        configuration newConfiguration: DeskLayouterConfiguration,
+        selectedPresetID: UUID?
+    ) {
+        let managed = Set(newConfiguration.managedApplications.map(\.bundleIdentifier))
+        let removals = appliedBaseline.keys.filter { !managed.contains($0) }.sorted()
+        configuration = DeskLayouterConfiguration(
+            managedApplications: newConfiguration.managedApplications,
+            pendingRemovals: removals
+        )
+        self.selectedPresetID = selectedPresetID
+    }
+
+    /// Associates the current working copy with a saved Preset (or with none,
+    /// showing "Custom Setup"), without touching the working configuration or the
+    /// applied baseline. Used after saving the current board as a new Preset so
+    /// the header reflects the association.
+    public mutating func associateSelectedPreset(_ id: UUID?) {
+        selectedPresetID = id
     }
 
     /// Advances the applied baseline to match the working configuration after a
