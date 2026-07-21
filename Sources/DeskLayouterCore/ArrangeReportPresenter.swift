@@ -52,9 +52,12 @@ public enum ArrangeReportPresenter {
         resisted: [String],
         pendingDesktops: [Int]
     ) -> Announcement {
-        let arranged = sortedNames(arranged)
-        let skipped = sortedNames(skipped)
-        let resisted = sortedNames(resisted)
+        // Apply the shared user-facing naming rule (issue #39) before sorting and
+        // listing, so no ".app" suffix ever reaches an Arrange sentence regardless
+        // of the raw names the caller threads in.
+        let arranged = sortedNames(arranged.map(ApplicationDisplayName.presented))
+        let skipped = sortedNames(skipped.map(ApplicationDisplayName.presented))
+        let resisted = sortedNames(resisted.map(ApplicationDisplayName.presented))
         let pending = pendingDesktops.sorted()
         let desktop = desktopPhrase(activeDesktop)
 

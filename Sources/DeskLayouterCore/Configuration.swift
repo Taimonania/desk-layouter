@@ -36,6 +36,12 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
         self.layout = layout
     }
 
+    /// The name to show the user — the raw ``displayName`` with any trailing
+    /// `.app` removed (issue #39). ``displayName`` stays raw so a legacy stored
+    /// Assignment keeps its persisted value; only presentation is cleaned, so
+    /// such an Assignment renders cleanly without being recreated.
+    public var presentedName: String { ApplicationDisplayName.presented(displayName) }
+
     /// The managed application's Assignment, as consumed by the planner.
     public var assignment: Assignment {
         Assignment(bundleIdentifier: bundleIdentifier, desktopNumber: desktopNumber)

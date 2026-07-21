@@ -109,6 +109,11 @@ let package = Package(
             path: "Tests/DeskLayouterArrangeReportTests"
         ),
         .executableTarget(
+            name: "DeskLayouterDisplayNameTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterDisplayNameTests"
+        ),
+        .executableTarget(
             name: "DeskLayouterMenuBarTests",
             dependencies: ["DeskLayouterMacOS"],
             path: "Tests/DeskLayouterMenuBarTests"

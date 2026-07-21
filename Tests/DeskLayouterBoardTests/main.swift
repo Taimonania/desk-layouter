@@ -259,6 +259,21 @@ struct BoardStateTestRunner {
                   "got \(String(describing: decoded))")
         }
 
+        // Legacy stored name: a previously saved Assignment whose display name
+        // still ends in ".app" projects a card that presents cleanly, without the
+        // stored raw name having to be recreated (issue #39). The raw displayName
+        // stays intact for persistence.
+        do {
+            let board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("Safari.app", "com.apple.Safari", desktop: 1),
+                ])
+            )
+            let card = board.columns(desktopCount: 1).first?.cards.first
+            check("a legacy .app card presents cleanly", card?.presentedName == "Safari", "got \(String(describing: card?.presentedName))")
+            check("a legacy .app card keeps its raw stored name", card?.displayName == "Safari.app", "got \(String(describing: card?.displayName))")
+        }
+
         if failures.isEmpty {
             print("Board state tests passed")
         } else {

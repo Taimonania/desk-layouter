@@ -22,6 +22,11 @@ public struct InstalledApplication: Equatable, Sendable, Identifiable {
     /// Stable identity for list selection: the bundle identifier uniquely
     /// identifies an application.
     public var id: String { bundleIdentifier }
+
+    /// The name to show the user — the raw ``displayName`` with any trailing
+    /// `.app` removed (issue #39). ``displayName`` stays raw for search,
+    /// sorting, and matching; only presentation uses this.
+    public var presentedName: String { ApplicationDisplayName.presented(displayName) }
 }
 
 /// Pure catalog logic for the app picker: merging installed apps with the

@@ -17,12 +17,6 @@ struct EditorView: View {
 
     private static let boardPadding: CGFloat = 20
 
-    /// Strips the ".app" bundle extension for display — users think in terms of
-    /// application names ("Spotify"), not bundle file names ("Spotify.app").
-    static func appDisplayName(_ rawName: String) -> String {
-        rawName.lowercased().hasSuffix(".app") ? String(rawName.dropLast(4)) : rawName
-    }
-
     var body: some View {
         GeometryReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
@@ -208,7 +202,7 @@ struct EditorView: View {
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
             icon(for: card)
-            Text(Self.appDisplayName(card.displayName))
+            Text(card.presentedName)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)
@@ -237,7 +231,7 @@ struct EditorView: View {
             moveButtons(for: card)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Self.appDisplayName(card.displayName)), Desktop \(card.desktopNumber), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable")
+        .accessibilityLabel("\(card.presentedName), Desktop \(card.desktopNumber), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable")
         .accessibilityActions {
             Button(card.hasLayout ? "Edit Layout" : "Set Layout") { editingLayoutCard = card }
             moveButtons(for: card)
@@ -260,7 +254,7 @@ struct EditorView: View {
         }
         .buttonStyle(.plain)
         .help(card.hasLayout ? "Edit this app's Layout" : "Set a Layout for this app")
-        .accessibilityLabel(card.hasLayout ? "Edit Layout for \(Self.appDisplayName(card.displayName))" : "Set Layout for \(Self.appDisplayName(card.displayName))")
+        .accessibilityLabel(card.hasLayout ? "Edit Layout for \(card.presentedName)" : "Set Layout for \(card.presentedName)")
     }
 
     /// The freshest projection of a card by bundle identifier, so a sheet opened
@@ -302,7 +296,7 @@ struct EditorView: View {
             }
             .buttonStyle(.borderless)
             .help("Remove this Assignment")
-            .accessibilityLabel("Remove \(Self.appDisplayName(card.displayName))")
+            .accessibilityLabel("Remove \(card.presentedName)")
         }
     }
 
@@ -407,7 +401,7 @@ struct EditorView: View {
         } label: {
             HStack(spacing: 8) {
                 iconView(forBundleIdentifier: application.bundleIdentifier)
-                Text(Self.appDisplayName(application.displayName))
+                Text(application.presentedName)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
@@ -437,7 +431,7 @@ struct EditorView: View {
                 hoveredBundleIdentifier = nil
             }
         }
-        .accessibilityLabel("Add \(Self.appDisplayName(application.displayName)) to Desktop \(model.newAssignmentDesktopNumber)")
+        .accessibilityLabel("Add \(application.presentedName) to Desktop \(model.newAssignmentDesktopNumber)")
     }
 
     @ViewBuilder
