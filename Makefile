@@ -26,6 +26,7 @@ test:
 	swift run DeskLayouterArrangeTests
 	swift run DeskLayouterArrangePlanTests
 	swift run DeskLayouterArrangeReportTests
+	swift run DeskLayouterDisplayNameTests
 	swift run DeskLayouterMenuBarTests
 
 test-desktop-placement:

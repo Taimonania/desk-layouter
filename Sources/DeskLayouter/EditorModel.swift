@@ -159,7 +159,7 @@ final class EditorModel: ObservableObject {
             displayName: match.displayName,
             bundleIdentifier: match.bundleIdentifier
         )
-        selectedApplicationName = match.displayName
+        selectedApplicationName = match.presentedName
     }
 
     /// Adds the picked application at the chosen destination Desktop as a new
@@ -187,7 +187,7 @@ final class EditorModel: ObservableObject {
             )
         )
         persist(
-            info: "Added \(selectedApplication.displayName) → Desktop \(newAssignmentDesktopNumber). Click Apply to enforce it."
+            info: "Added \(ApplicationDisplayName.presented(selectedApplication.displayName)) → Desktop \(newAssignmentDesktopNumber). Click Apply to enforce it."
         )
     }
 
@@ -300,7 +300,7 @@ final class EditorModel: ObservableObject {
                     && changedIdentifiers.contains($0.bundleIdentifier)
                     && managedIdentifiers.contains($0.bundleIdentifier)
             }
-            .map(\.displayName)
+            .map(\.presentedName)
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         if runningNames.isEmpty {
             message += " Newly launched apps open on their assigned Desktop."

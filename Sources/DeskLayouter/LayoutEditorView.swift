@@ -110,7 +110,7 @@ struct LayoutEditorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Layout")
                     .font(.headline)
-                Text("Where \(EditorView.appDisplayName(card.displayName))'s window sits on Desktop \(card.desktopNumber). Use Arrange to move the window into it.")
+                Text("Where \(card.presentedName)'s window sits on Desktop \(card.desktopNumber). Use Arrange to move the window into it.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

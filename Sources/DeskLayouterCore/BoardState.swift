@@ -32,6 +32,11 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
     /// have a Layout differently from those that do not.
     public var hasLayout: Bool { layout != nil }
 
+    /// The name to show the user — the raw ``displayName`` with any trailing
+    /// `.app` removed (issue #39). ``displayName`` stays raw; only presentation
+    /// uses this.
+    public var presentedName: String { ApplicationDisplayName.presented(displayName) }
+
     /// Stable identity for drag sources and list diffing: a managed application
     /// is assigned to exactly one Desktop, so its bundle identifier is unique
     /// across the whole board.
