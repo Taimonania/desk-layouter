@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import DeskLayouterCore
 import DeskLayouterMacOS
+import Sparkle
 import SwiftUI
 
 @MainActor
@@ -9,6 +10,16 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let editorModel = EditorModel()
+
+    // Sparkle's standard controller owns the whole update flow (scheduling, UI,
+    // signature checks). It reads SUFeedURL/SUPublicEDKey from Info.plist and
+    // starts checking on its own once created; `checkForUpdates:` is the manual
+    // entry point wired to the menu item below.
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     /// Owns the editor window's open/focus/reuse lifecycle (issue #40). The window
     /// factory, focus behavior, and terminate are wired to AppKit here; the
@@ -80,7 +91,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func statusItemClicked() {
-        presenter.openOrFocusEditor()
+        // Left-click keeps the primary flow (open/focus the editor); right-click
+        // pops the menu that hosts app-level commands like "Check for Updates…".
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showStatusMenu()
+        } else {
+            presenter.openOrFocusEditor()
+        }
+    }
+
+    private func showStatusMenu() {
+        guard let statusItem else { return }
+
+        let menu = NSMenu()
+        // Sparkle enables/disables this item and populates its title; the action
+        // must be `checkForUpdates:` targeting the standard updater controller.
+        let checkForUpdates = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        checkForUpdates.target = updaterController
+        menu.addItem(checkForUpdates)
+
+        // Attaching the menu makes the status item present it for this click, then
+        // we clear it so the next left-click routes through `statusItemClicked`.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     private func makeEditorWindow() -> NSWindow {

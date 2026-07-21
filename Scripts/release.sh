@@ -142,7 +142,17 @@ do_preflight() {
 
 do_build() {
     print "release: building universal .app (arm64 + x86_64)..."
-    RELEASE_ARCHS="arm64 x86_64" CONFIGURATION=release "$build_app_script" >/dev/null
+    # Export the identity so build-app.sh re-signs Sparkle's nested helpers and
+    # the framework inside-out during the build. do_sign then re-signs only the
+    # outer binary + app bundle (idempotent). If no single identity resolves we
+    # build un-signed and let do_sign surface the error, exactly as before.
+    local build_identity
+    if build_identity=$(resolve_identity 2>/dev/null); then
+        DEVELOPER_ID_APPLICATION="$build_identity" \
+            RELEASE_ARCHS="arm64 x86_64" CONFIGURATION=release "$build_app_script" >/dev/null
+    else
+        RELEASE_ARCHS="arm64 x86_64" CONFIGURATION=release "$build_app_script" >/dev/null
+    fi
     [[ -d "$app_bundle" ]] || die "build did not produce $app_bundle"
 
     local archs

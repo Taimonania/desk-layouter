@@ -28,5 +28,14 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Sparkle auto-update configuration (issue #45). -->
+	<key>SUFeedURL</key>
+	<string>https://taimonania.github.io/desk-layouter/appcast.xml</string>
+	<!-- PLACEHOLDER: replace with the real EdDSA public key emitted by Sparkle's
+	     `generate_keys` tool before shipping. This dummy value is NOT a valid key
+	     and only exists so the plist is well-formed; updates will be rejected
+	     until it is swapped for the production key. -->
+	<key>SUPublicEDKey</key>
+	<string>PLACEHOLDER_REPLACE_WITH_REAL_ED_PUBLIC_KEY=</string>
 </dict>
 </plist>
