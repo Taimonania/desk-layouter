@@ -486,10 +486,15 @@ final class EditorModel: ObservableObject {
     /// Saves the current working board as a new Preset under the given name,
     /// capturing every managed application, its Assignment, and its optional
     /// Layout — including an empty board. The name is validated (non-empty and
-    /// unique ignoring capitalization); an invalid name produces inline feedback
-    /// and replaces nothing. On success the working copy is associated with the
-    /// new Preset and both files are persisted. This never Applies or Arranges.
-    func saveCurrentBoardAsPreset(named name: String) {
+    /// unique ignoring capitalization); an invalid name replaces nothing.
+    ///
+    /// Returns `nil` on success (the caller dismisses its save prompt), or a
+    /// clear error message to show inline so the user can correct the name in
+    /// place without losing what they typed. On success the working copy is
+    /// associated with the new Preset and both files are persisted. This never
+    /// Applies or Arranges.
+    @discardableResult
+    func saveCurrentBoardAsPreset(named name: String) -> String? {
         do {
             // Validate and add against a copy so a disk-write failure cannot leave
             // the in-memory library ahead of what is stored.
@@ -502,19 +507,21 @@ final class EditorModel: ObservableObject {
             presetLibrary = updatedLibrary
             board.associateSelectedPreset(created.id)
             selectedPresetID = created.id
+            refreshPresets()
             do {
                 try boardStateStore.save(board)
             } catch {
+                // The Preset itself was saved; only the board-association write
+                // failed. Report it in the status line but treat the save as done.
                 feedback = .failure("Saved the Preset, but could not store the board: \(error.localizedDescription)")
-                refreshPresets()
-                return
+                return nil
             }
-            refreshPresets()
             feedback = .success("Saved Preset \"\(created.name)\".")
+            return nil
         } catch let error as PresetNameError {
-            feedback = .failure(presetNameErrorMessage(error))
+            return presetNameErrorMessage(error)
         } catch {
-            feedback = .failure("Could not save the Preset: \(error.localizedDescription)")
+            return "Could not save the Preset: \(error.localizedDescription)"
         }
     }
 

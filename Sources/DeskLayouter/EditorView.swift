@@ -16,6 +16,7 @@ struct EditorView: View {
     @State private var editingLayoutCard: BoardCard?
     @State private var showingSavePresetSheet = false
     @State private var newPresetName = ""
+    @State private var savePresetError: String?
 
     private static let boardPadding: CGFloat = 20
 
@@ -145,6 +146,7 @@ struct EditorView: View {
 
             Button {
                 newPresetName = ""
+                savePresetError = nil
                 showingSavePresetSheet = true
             } label: {
                 Label("Save as Preset…", systemImage: "square.and.arrow.down")
@@ -177,6 +179,14 @@ struct EditorView: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Preset name")
                 .onSubmit(commitSavePreset)
+                .onChange(of: newPresetName) { _ in savePresetError = nil }
+            if let savePresetError {
+                Text(savePresetError)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Error: \(savePresetError)")
+            }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) {
@@ -194,14 +204,21 @@ struct EditorView: View {
         .frame(width: 380)
     }
 
-    /// Saves the board as a Preset and dismisses the sheet. Validation feedback
-    /// (empty or duplicate name) surfaces in the editor's status line via the
-    /// model, so a rejected name never silently replaces another Preset.
+    /// Saves the board as a Preset. On success the sheet dismisses; on a rejected
+    /// name (empty or a case-insensitive duplicate) the error is shown inline and
+    /// the sheet stays open with the typed name intact, so a rejected name never
+    /// silently replaces another Preset.
     private func commitSavePreset() {
         let name = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        model.saveCurrentBoardAsPreset(named: name)
-        showingSavePresetSheet = false
+        guard !name.isEmpty else {
+            savePresetError = "Enter a name for the Preset."
+            return
+        }
+        if let error = model.saveCurrentBoardAsPreset(named: name) {
+            savePresetError = error
+        } else {
+            showingSavePresetSheet = false
+        }
     }
 
     // MARK: - Board
