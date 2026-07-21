@@ -5,6 +5,11 @@ import UniformTypeIdentifiers
 
 struct EditorView: View {
     @ObservedObject var model: EditorModel
+
+    /// Quits Desk Layouter. Injected so the editor header's Quit button routes
+    /// through the same lifecycle seam the menu bar uses (issue #40).
+    let quit: () -> Void
+
     @State private var dropTargetDesktop: Int?
     @State private var searchFieldWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
@@ -89,6 +94,18 @@ struct EditorView: View {
             }
             .help("Re-read the current Desktops and installed applications")
             .accessibilityLabel("Refresh Desktops and applications")
+            // Quit sits beside Refresh now that the menu-bar icon opens the editor
+            // directly instead of presenting a menu (issue #40). Command-Q triggers
+            // it while the editor is active. Quitting is immediate and unconfirmed;
+            // pending edits are already stored, so nothing is lost.
+            Button(role: .destructive) {
+                quit()
+            } label: {
+                Label("Quit", systemImage: "power")
+            }
+            .keyboardShortcut("q", modifiers: .command)
+            .help("Quit Desk Layouter")
+            .accessibilityLabel("Quit Desk Layouter")
         }
     }
 
