@@ -23,6 +23,7 @@ let package = Package(
                 "ConfigurationStore.swift",
                 "BoardStateStore.swift",
                 "PresetLibraryStore.swift",
+                "PresetSwitch.swift",
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
                 "DesktopArrangePlan.swift",
@@ -39,6 +40,7 @@ let package = Package(
                 "ConfigurationStore.swift",
                 "BoardStateStore.swift",
                 "PresetLibraryStore.swift",
+                "PresetSwitch.swift",
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
                 "DesktopArrangePlan.swift",
@@ -59,6 +61,11 @@ let package = Package(
             name: "DeskLayouterPresetTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterPresetTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterPresetSwitchTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterPresetSwitchTests"
         ),
         .executableTarget(
             name: "DeskLayouterLayoutTests",

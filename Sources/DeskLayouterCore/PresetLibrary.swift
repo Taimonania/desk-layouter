@@ -41,6 +41,22 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
         presets.first { $0.id == id }
     }
 
+    /// Whether the working board has been modified relative to the Preset it is
+    /// associated with. Returns `false` when no resolvable Preset is selected
+    /// (a nil or dangling selection is "Custom Setup" — there is no stored Preset
+    /// to differ from). This is the dirty-relative-to-Preset detection that
+    /// switching protection keys off; it is distinct from ``BoardState/isDirty``,
+    /// which tracks pending Assignments awaiting Apply.
+    public func isModified(
+        _ configuration: DeskLayouterConfiguration,
+        from selectedPresetID: Preset.ID?
+    ) -> Bool {
+        guard let selectedPresetID, let preset = preset(for: selectedPresetID) else {
+            return false
+        }
+        return !preset.matches(configuration)
+    }
+
     /// Whether a name is already taken, ignoring capitalization and surrounding
     /// whitespace. Returns the existing Preset whose name collides, if any.
     private func existingPreset(named name: String) -> Preset? {

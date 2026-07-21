@@ -38,6 +38,13 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
     public var configuration: DeskLayouterConfiguration {
         DeskLayouterConfiguration(managedApplications: managedApplications)
     }
+
+    /// Whether the given working board still matches this Preset's captured board
+    /// (every managed application, its Assignment, and its Layout), independent of
+    /// ordering. Used to protect a modified working copy when switching Presets.
+    public func matches(_ configuration: DeskLayouterConfiguration) -> Bool {
+        self.configuration.hasSameManagedBoard(as: configuration)
+    }
 }
 
 /// Why a proposed Preset name was rejected. Surfaced as inline feedback so an

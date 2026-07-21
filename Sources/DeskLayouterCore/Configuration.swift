@@ -152,6 +152,22 @@ public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
     public mutating func clearPendingRemovals() {
         pendingRemovals = []
     }
+
+    /// Order-independent equality of the managed board — every Assignment and its
+    /// Layout, keyed by bundle identifier. Used to detect whether a working copy
+    /// still matches the Preset it was loaded from, regardless of the order the
+    /// applications happen to sit in. Deliberately ignores `pendingRemovals`,
+    /// which is an Apply/baseline concern, never a Preset-storage concern.
+    public func hasSameManagedBoard(as other: DeskLayouterConfiguration) -> Bool {
+        managedBoardByBundleIdentifier == other.managedBoardByBundleIdentifier
+    }
+
+    private var managedBoardByBundleIdentifier: [String: ManagedApplication] {
+        Dictionary(
+            managedApplications.map { ($0.bundleIdentifier, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+    }
 }
 
 /// Pure JSON serialization for the configuration — the encode/decode seam,

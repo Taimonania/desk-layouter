@@ -67,6 +67,34 @@ struct EditorView: View {
         .sheet(isPresented: $showingSavePresetSheet) {
             savePresetSheet
         }
+        .confirmationDialog(
+            presetSwitchTitle,
+            isPresented: Binding(
+                get: { model.pendingPresetSwitch != nil },
+                set: { presenting in if !presenting { model.cancelPresetSwitch() } }
+            ),
+            titleVisibility: .visible,
+            presenting: model.pendingPresetSwitch
+        ) { pending in
+            Button("Update and Switch") {
+                model.confirmUpdateAndSwitch()
+            }
+            .keyboardShortcut(.defaultAction)
+            .accessibilityLabel("Update Preset \(pending.currentPresetName) and switch to \(pending.targetName)")
+
+            Button("Discard and Switch", role: .destructive) {
+                model.confirmDiscardAndSwitch()
+            }
+            .accessibilityLabel("Discard changes to Preset \(pending.currentPresetName) and switch to \(pending.targetName)")
+
+            Button("Cancel", role: .cancel) {
+                model.cancelPresetSwitch()
+            }
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Cancel switching Presets and keep the current working copy")
+        } message: { pending in
+            Text("The board has unsaved changes to the Preset \"\(pending.currentPresetName)\". Choose whether to store them in \"\(pending.currentPresetName)\" before switching to \"\(pending.targetName)\". This never Applies or Arranges.")
+        }
         .onPreferenceChange(SearchFieldWidthKey.self) { searchFieldWidth = $0 }
         .onAppear { model.refresh() }
         // The Desktop list is a point-in-time snapshot; re-read it when the
@@ -126,7 +154,7 @@ struct EditorView: View {
                 } else {
                     ForEach(model.presets) { preset in
                         Button {
-                            model.loadPreset(id: preset.id)
+                            model.selectPreset(id: preset.id)
                         } label: {
                             if preset.id == model.selectedPresetID {
                                 Label(preset.name, systemImage: "checkmark")
@@ -165,6 +193,13 @@ struct EditorView: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    private var presetSwitchTitle: String {
+        if let pending = model.pendingPresetSwitch {
+            return "Save changes to \"\(pending.currentPresetName)\" before switching?"
+        }
+        return "Save changes before switching?"
     }
 
     private var savePresetSheet: some View {
