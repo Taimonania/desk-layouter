@@ -376,22 +376,88 @@ struct EditorView: View {
 
     @ViewBuilder
     private func board(availableWidth: CGFloat) -> some View {
-        if model.columns.isEmpty {
+        if model.columns.isEmpty, model.unavailableDesktops.isEmpty {
             Text("No Desktops were found on the active display.")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 160)
         } else {
+            VStack(alignment: .leading, spacing: 18) {
+                LazyVGrid(
+                    columns: gridColumns(availableWidth: availableWidth),
+                    alignment: .leading,
+                    spacing: 14
+                ) {
+                    ForEach(model.columns) { column in
+                        desktopColumn(column)
+                    }
+                }
+                .padding(.vertical, 2)
+
+                // Assignments stranded on Desktops that no longer exist stay
+                // visible and recoverable here rather than being dropped (issue
+                // #52). Each card can be moved to a Desktop that exists.
+                if !model.unavailableDesktops.isEmpty {
+                    unavailableDesktopsRegion(availableWidth: availableWidth)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func unavailableDesktopsRegion(availableWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+                Text("Unavailable Desktops")
+                    .font(.headline)
+            }
+            Text("These Assignments target Desktops that don't exist right now. Nothing was dropped — move each app to a Desktop that exists to enable Apply. They reappear on their Desktop if it returns.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             LazyVGrid(
                 columns: gridColumns(availableWidth: availableWidth),
                 alignment: .leading,
                 spacing: 14
             ) {
-                ForEach(model.columns) { column in
-                    desktopColumn(column)
+                ForEach(model.unavailableDesktops) { section in
+                    unavailableDesktopSection(section)
                 }
             }
-            .padding(.vertical, 2)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.orange.opacity(0.4)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Unavailable Desktops. These Assignments target Desktops that do not currently exist.")
+    }
+
+    private func unavailableDesktopSection(_ section: UnavailableDesktopSection) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(section.title)
+                    .font(.headline)
+                Spacer()
+                Text("\(section.assignmentCount)")
+                    .font(.caption.monospacedDigit())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.25)))
+                    .accessibilityLabel("\(section.assignmentCount) Assignments")
+            }
+            ForEach(section.cards) { card in
+                appCard(card)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.06)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(section.title), \(section.assignmentCount) Assignments")
     }
 
     /// Flexible columns that stretch to fill the available width, but never more
@@ -474,6 +540,10 @@ struct EditorView: View {
             Text(card.presentedName)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .foregroundStyle(card.isApplicationAvailable ? Color.primary : Color.secondary)
+            if !card.isApplicationAvailable {
+                unavailableAppBadge
+            }
             Spacer(minLength: 4)
             layoutButton(card)
             cardControls(card)
@@ -500,11 +570,30 @@ struct EditorView: View {
             moveButtons(for: card)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(card.presentedName), Desktop \(card.desktopNumber), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable")
+        .accessibilityLabel(cardAccessibilityLabel(card))
         .accessibilityActions {
             Button(card.hasLayout ? "Edit Layout" : "Set Layout") { editingLayoutCard = card }
             moveButtons(for: card)
         }
+    }
+
+    /// A small badge marking a managed application that is not currently installed
+    /// (issue #52). Its Assignment stays stored and visible; the badge tells the
+    /// user why the app has no icon and won't be arranged until it is reinstalled.
+    private var unavailableAppBadge: some View {
+        Text("Not installed")
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.orange.opacity(0.22)))
+            .foregroundStyle(.orange)
+            .help("This app isn't installed right now. Its Assignment is kept and will take effect again if you reinstall the app.")
+            .accessibilityHidden(true)
+    }
+
+    private func cardAccessibilityLabel(_ card: BoardCard) -> String {
+        let availability = card.isApplicationAvailable ? "" : ", not installed"
+        return "\(card.presentedName), Desktop \(card.desktopNumber)\(availability), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable"
     }
 
     /// The Layout affordance on a card: a live mini-grid preview when the app has a
@@ -530,8 +619,9 @@ struct EditorView: View {
     /// from a card always seeds from the current stored Layout rather than a stale
     /// capture.
     private func currentCard(for card: BoardCard) -> BoardCard? {
-        model.columns
-            .flatMap(\.cards)
+        let available = model.columns.flatMap(\.cards)
+        let unavailable = model.unavailableDesktops.flatMap(\.cards)
+        return (available + unavailable)
             .first { $0.bundleIdentifier == card.bundleIdentifier }
     }
 
@@ -750,7 +840,13 @@ struct EditorView: View {
             .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
             .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
 
-            if model.pendingChangeCount > 0 {
+            if let explanation = model.applyBlockedExplanation {
+                Text(explanation)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(explanation)
+            } else if model.pendingChangeCount > 0 {
                 Text("^[\(model.pendingChangeCount) unapplied change](inflect: true)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
