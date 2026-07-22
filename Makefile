@@ -1,6 +1,6 @@
 .PHONY: build run relaunch test test-desktop-placement \
 	session-boundary-arm session-boundary-verify session-boundary-restore \
-	release release-preflight verify-release
+	release release-preflight release-appcast verify-release
 
 build:
 	./Scripts/build-app.sh
@@ -49,17 +49,24 @@ session-boundary-verify:
 session-boundary-restore:
 	./Scripts/verify-session-boundary.sh restore
 
-# Release pipeline (issue #44). `release-preflight` checks tools + credentials
-# and publishes nothing. `release` builds → signs → notarizes → staples locally;
-# it publishes to GitHub Releases only when RELEASE_PUBLISH=1. `verify-release`
-# asserts the local artifact and, once published, its public availability.
-# Manual prerequisites (Developer ID cert, notary credential, create-dmg) are
-# documented in docs/releasing.md.
+# Release pipeline (issues #44, #46). `release-preflight` checks tools +
+# credentials and publishes nothing. `release` builds → signs → notarizes →
+# staples → generates the EdDSA-signed Sparkle appcast locally; it publishes to
+# GitHub Releases and deploys the appcast to GitHub Pages only when
+# RELEASE_PUBLISH=1. `release-appcast` runs just the zip+appcast stage against an
+# already-built/signed app (handy for iterating on the feed). `verify-release`
+# asserts the local artifact and, once published, its public availability
+# (assets + the signed appcast at SUFeedURL). Manual prerequisites (Developer ID
+# cert, notary credential, create-dmg, enabling GitHub Pages) are documented in
+# docs/releasing.md.
 release-preflight:
 	./Scripts/release.sh preflight
 
 release:
 	./Scripts/release.sh all
+
+release-appcast:
+	./Scripts/release.sh appcast
 
 verify-release:
 	./Scripts/release.sh verify

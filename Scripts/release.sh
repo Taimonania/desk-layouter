@@ -20,16 +20,25 @@ set -eu
 #                     secure timestamp, never --deep).
 #   package           Assemble a signed .dmg via create-dmg and record a manifest.
 #   notarize          Submit the .dmg to Apple notary service and wait.
-#   staple            Staple the notarization ticket to the .dmg.
-#   publish           Create the GitHub Release and upload the .dmg. IRREVERSIBLE
-#                     and public — refuses unless RELEASE_PUBLISH=1.
+#   staple            Staple the notarization ticket to the .dmg and the .app
+#                     (so the Sparkle update zip carries an offline ticket).
+#   appcast           Zip the signed/stapled .app for Sparkle and generate an
+#                     EdDSA-signed appcast.xml pointing at the Release download
+#                     URLs. Signs but publishes nothing.
+#   publish           Create the GitHub Release (uploads the .dmg AND the update
+#                     .zip) and deploy appcast.xml to GitHub Pages so it is
+#                     reachable at SUFeedURL. IRREVERSIBLE and public — refuses
+#                     unless RELEASE_PUBLISH=1.
 #   verify            verify-local + verify-available.
 #   verify-local      Assert the local artifact: codesign --verify --strict,
 #                     Developer ID identity + hardened runtime, spctl, stapler.
 #   verify-available  Assert each published asset URL returns 200 and its
-#                     checksum matches the local artifact.
+#                     checksum matches the local artifact, and that the appcast
+#                     at SUFeedURL returns 200, parses as XML, has a non-empty
+#                     sparkle:edSignature on its newest enclosure, and that
+#                     enclosure's URL returns 200.
 #   all               preflight → build → sign → package → notarize → staple →
-#                     (publish, if RELEASE_PUBLISH=1) → verify.
+#                     appcast → (publish, if RELEASE_PUBLISH=1) → verify.
 #
 # Manual, human-only prerequisites this script CONSUMES (it never creates them):
 #   * Apple Developer Program membership.
@@ -52,8 +61,16 @@ app_bundle="$repo_dir/.build/Desk Layouter.app"
 manifest="$release_dir/manifest.json"
 notes_file="${RELEASE_NOTES_FILE:-$repo_dir/RELEASE_NOTES.md}"
 
+# generate_appcast is vendored by SPM under the Sparkle artifact bundle; resolve
+# it relative to the package rather than hardcoding a brittle absolute path.
+sparkle_bin_dir="$repo_dir/.build/artifacts/sparkle/Sparkle/bin"
+# The SUFeedURL baked into Info.plist by #45 is the single source of truth for
+# where the appcast must be reachable; read it here so the publish and verify
+# stages can never drift from what installed builds actually poll.
+feed_url=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$info_plist")
+
 usage() {
-    print -u2 "usage: $0 {preflight|build|sign|package|notarize|staple|publish|verify|verify-local|verify-available|all}"
+    print -u2 "usage: $0 {preflight|build|sign|package|notarize|staple|appcast|publish|verify|verify-local|verify-available|all}"
     exit 2
 }
 
@@ -65,6 +82,14 @@ die() { print -u2 "release: $1"; exit 1; }
 release_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist")
 release_tag="v$release_version"
 dmg_file="$release_dir/DeskLayouter-$release_version.dmg"
+
+# Sparkle update-archive + appcast paths (derived from the version, like the
+# .dmg). The appcast is generated over a staging directory that holds only the
+# update zip, so generate_appcast never mistakes the .dmg for an update archive;
+# it writes appcast.xml into that same directory.
+appcast_dir="$release_dir/appcast"
+zip_file="$appcast_dir/DeskLayouter-$release_version.zip"
+appcast_file="$appcast_dir/appcast.xml"
 
 # Resolve the Developer ID Application signing identity. Honors an explicit
 # override; otherwise auto-detects a single matching identity in the keychain
@@ -91,13 +116,46 @@ resolve_identity() {
     printf '%s\n' "$found" | sed -E 's/.*"(.*)".*/\1/'
 }
 
+# Resolve Sparkle's generate_appcast, vendored by SPM under the Sparkle artifact
+# bundle. It only exists after a build has fetched Sparkle, so fail loudly with
+# a fix rather than letting a later invocation die cryptically.
+resolve_generate_appcast() {
+    local gen="$sparkle_bin_dir/generate_appcast"
+    [[ -x "$gen" ]] || die "generate_appcast not found at $gen; run a build first (e.g. 'make build') so SPM fetches Sparkle"
+    print "$gen"
+}
+
+# Assert an appcast is well-formed and that its NEWEST <enclosure> (the first
+# one; generate_appcast orders newest-first) carries a non-empty
+# sparkle:edSignature and a download URL under the GitHub Releases prefix. This
+# is the observable proof that EdDSA signing actually happened — used both for
+# the local appcast stage and against the downloaded live feed in verify.
+assert_appcast_signed() {
+    local file="$1"
+    xmllint --noout "$file" 2>/dev/null || die "appcast is not well-formed XML: $file"
+    local enclosure
+    enclosure=$(grep -o '<enclosure[^>]*>' "$file" | head -n1)
+    [[ -n "$enclosure" ]] || die "appcast has no <enclosure>: $file"
+    # A quoted, non-empty capture ([^"]+) is exactly the "signature is present
+    # and non-empty" assertion the AC calls for.
+    printf '%s' "$enclosure" | grep -qoE 'sparkle:edSignature="[^"]+"' \
+        || die "newest appcast enclosure has no non-empty sparkle:edSignature: $file"
+    local url
+    url=$(printf '%s' "$enclosure" | grep -oE 'url="[^"]+"' | head -n1 | sed -E 's/url="(.*)"/\1/')
+    case "$url" in
+        "https://github.com/$release_repo/releases/download/"*) ;;
+        *) die "newest appcast enclosure url is not under the GitHub Releases prefix: '${url:-<none>}'" ;;
+    esac
+    print "$url"
+}
+
 # --- preflight ------------------------------------------------------------
 
 do_preflight() {
     local missing=()
 
     local tool
-    for tool in swift codesign xcrun create-dmg gh shasum curl jq; do
+    for tool in swift codesign xcrun create-dmg gh shasum curl jq xmllint ditto; do
         command -v "$tool" >/dev/null 2>&1 || missing+=("tool: $tool")
     done
     command -v /usr/libexec/PlistBuddy >/dev/null 2>&1 || missing+=("tool: PlistBuddy")
@@ -255,12 +313,71 @@ do_staple() {
     dmg=$(manifest_field dmg)
     [[ -f "$dmg" ]] || die "no .dmg at $dmg; run 'package' first"
     xcrun stapler staple "$dmg" || die "stapling failed"
+    # Also staple the .app itself. The notary submission notarized the app's code
+    # (it rode inside the .dmg), but the .dmg's stapled ticket does NOT travel
+    # with the app once Sparkle extracts it from the update zip. Stapling the app
+    # gives the zipped bundle its own offline-valid ticket. do_appcast zips this
+    # stapled app, so the update archive matches what notarization approved.
+    local app
+    app=$(manifest_field app)
+    [[ -d "$app" ]] || die "no .app at $app; run 'build'/'sign' first"
+    xcrun stapler staple "$app" || die "stapling the .app failed"
     # Stapling rewrites the .dmg in place, so the checksum recorded at package
     # time is now stale. Refresh the manifest to the bytes we actually publish,
     # or verify-available would compare the downloaded (stapled) .dmg against a
     # pre-staple hash and always fail.
     write_manifest "$dmg"
-    print "release: stapled OK"
+    print "release: stapled OK (.dmg + .app)"
+}
+
+# --- appcast (zip + EdDSA-signed feed) ------------------------------------
+
+do_appcast() {
+    local app
+    app=$(manifest_field app)
+    [[ -d "$app" ]] || die "no .app to archive at $app; run build/sign/package/staple first"
+    local gen
+    gen=$(resolve_generate_appcast) || exit 1
+
+    # Fresh staging dir holding ONLY the update zip, so generate_appcast has a
+    # single unambiguous archive to sign and never picks up the .dmg.
+    rm -rf "$appcast_dir"
+    mkdir -p "$appcast_dir"
+
+    print "release: creating Sparkle update zip via ditto (keepParent preserves bundle metadata)..."
+    # ditto -c -k --keepParent produces the zip-of-.app layout Sparkle expects,
+    # preserving symlinks and extended attributes (unlike `zip`).
+    ditto -c -k --keepParent "$app" "$zip_file"
+    [[ -f "$zip_file" ]] || die "ditto did not produce $zip_file"
+
+    # Preserve prior appcast state: seed the staging dir with the currently
+    # published feed (if any) so generate_appcast keeps older <item> entries
+    # instead of emitting a feed with only this release. On the first release
+    # the feed 404s and we generate a fresh appcast.
+    local feed_code
+    feed_code=$(curl -sL -o "$appcast_file" -w '%{http_code}' "$feed_url" 2>/dev/null || echo 000)
+    if [[ "$feed_code" == "200" ]]; then
+        print "release: seeded prior appcast from $feed_url"
+    else
+        rm -f "$appcast_file"
+        print "release: no prior appcast at $feed_url ($feed_code); generating a fresh feed"
+    fi
+
+    print "release: generating EdDSA-signed appcast.xml (private key read from the login keychain)..."
+    # --download-url-prefix rewrites the new enclosure's URL to the GitHub
+    # Release asset it will be uploaded to; older seeded items keep their own
+    # already-absolute URLs. The EdDSA key is read from the keychain automatically.
+    "$gen" \
+        --download-url-prefix "https://github.com/$release_repo/releases/download/$release_tag/" \
+        "$appcast_dir" \
+        || die "generate_appcast failed"
+    [[ -f "$appcast_file" ]] || die "generate_appcast did not produce $appcast_file"
+
+    local url
+    # assert_appcast_signed die()s (in this subshell) on any failure; propagate it.
+    url=$(assert_appcast_signed "$appcast_file") || exit 1
+    print "release: appcast OK -> $appcast_file"
+    print "  newest enclosure: $url"
 }
 
 # --- publish (irreversible, public) ---------------------------------------
@@ -274,19 +391,71 @@ do_publish() {
     tag=$(manifest_field tag)
     version=$(manifest_field version)
     [[ -f "$dmg" ]] || die "no .dmg to publish; run the earlier stages first"
+    [[ -f "$zip_file" ]] || die "no update .zip to publish at $zip_file; run 'appcast' first"
+    [[ -f "$appcast_file" ]] || die "no appcast to publish at $appcast_file; run 'appcast' first"
 
     [[ -f "$notes_file" ]] || die "release notes not found at $notes_file (see docs/releasing.md for the Highlights/Notes template)"
     grep -q '^## Highlights' "$notes_file" || die "release notes must contain a '## Highlights' section"
     grep -q '^## Notes' "$notes_file" || die "release notes must contain a '## Notes' section"
 
-    print "release: creating GitHub Release $tag on $release_repo..."
-    gh release create "$tag" "$dmg" \
+    # Upload BOTH the human .dmg and the Sparkle update .zip. The appcast
+    # enclosure points at the .zip via the GitHub Releases download URL, so it
+    # must be an asset on this same release/tag.
+    print "release: creating GitHub Release $tag on $release_repo (assets: .dmg + update .zip)..."
+    GH_HOST=github.com gh release create "$tag" "$dmg" "$zip_file" \
         --repo "$release_repo" \
         --title "Desk Layouter $version" \
         --notes-file "$notes_file" \
         --latest \
         || die "gh release create failed"
     print "release: published $tag"
+
+    deploy_appcast_to_pages "$appcast_file"
+}
+
+# Deploy appcast.xml to GitHub Pages so it is reachable at SUFeedURL. The deploy
+# is transactional and NEVER touches main: it runs entirely inside a throwaway
+# clone checked out on the gh-pages branch, overwrites only appcast.xml (leaving
+# any other served files such as a CNAME intact), commits, and pushes once. On
+# the very first release gh-pages does not exist yet, so we create it as an
+# orphan branch. Idempotent: if appcast.xml is byte-identical, nothing is pushed.
+deploy_appcast_to_pages() {
+    local appcast="$1"
+    [[ -f "$appcast" ]] || die "no appcast at $appcast; run 'appcast' first"
+
+    print "release: deploying appcast.xml to GitHub Pages (gh-pages branch on $release_repo)..."
+    local tmp work
+    tmp=$(mktemp -d)
+    work="$tmp/pages"
+
+    if GH_HOST=github.com gh repo clone "$release_repo" "$work" -- \
+            --branch gh-pages --single-branch --depth 1 >/dev/null 2>&1; then
+        print "  updating existing gh-pages branch"
+    else
+        print "  gh-pages branch not found; creating it as an orphan branch"
+        GH_HOST=github.com gh repo clone "$release_repo" "$work" -- --depth 1 >/dev/null 2>&1 \
+            || { rm -rf "$tmp"; die "could not clone $release_repo for the Pages deploy"; }
+        git -C "$work" checkout --orphan gh-pages >/dev/null 2>&1 \
+            || { rm -rf "$tmp"; die "could not create an orphan gh-pages branch"; }
+        git -C "$work" rm -rf . >/dev/null 2>&1 || true
+    fi
+
+    cp "$appcast" "$work/appcast.xml"
+    git -C "$work" add appcast.xml
+    if git -C "$work" diff --cached --quiet; then
+        print "  appcast.xml unchanged; nothing to deploy"
+        rm -rf "$tmp"
+        return 0
+    fi
+    git -C "$work" \
+        -c user.name="Desk Layouter Release" \
+        -c user.email="release@desklayouter.local" \
+        commit -q -m "Publish appcast for $release_tag" \
+        || { rm -rf "$tmp"; die "could not commit appcast to gh-pages"; }
+    git -C "$work" push origin gh-pages >/dev/null 2>&1 \
+        || { rm -rf "$tmp"; die "could not push gh-pages (Pages deploy)"; }
+    rm -rf "$tmp"
+    print "  pushed appcast.xml to gh-pages -> reachable at $feed_url"
 }
 
 # --- verify ---------------------------------------------------------------
@@ -375,6 +544,38 @@ do_verify_available() {
     fi
     rm -rf "$tmp"
 
+    # Appcast availability: the feed at SUFeedURL must be live, parse as XML,
+    # carry a signed newest enclosure, and that enclosure must be downloadable.
+    # This is what an installed build actually polls, so assert against it.
+    print "verify-available: appcast at $feed_url must be published, signed, and downloadable..."
+    local atmp acode
+    atmp=$(mktemp -d)
+    acode=$(curl -sL -o "$atmp/appcast.xml" -w '%{http_code}' "$feed_url" 2>/dev/null || echo 000)
+    if [[ "$acode" != "200" ]]; then
+        print -u2 "  FAIL ($acode)  $feed_url"
+        failed=1
+    else
+        print "  200 OK  $feed_url"
+        # assert_appcast_signed die()s on any failure; run it in a subshell so a
+        # bad feed fails this stage rather than aborting the whole script, and so
+        # verify-local (already run) still reported.
+        local enc_url
+        if enc_url=$(assert_appcast_signed "$atmp/appcast.xml" 2>/dev/null); then
+            print "  appcast XML valid, newest enclosure signed: $enc_url"
+            code=$(curl -sIL -o /dev/null -w '%{http_code}' "$enc_url" || echo 000)
+            if [[ "$code" == "200" ]]; then
+                print "  200 OK  $enc_url"
+            else
+                print -u2 "  FAIL ($code)  $enc_url"
+                failed=1
+            fi
+        else
+            print -u2 "  FAIL: appcast is not valid XML or its newest enclosure lacks a signed download URL"
+            failed=1
+        fi
+    fi
+    rm -rf "$atmp"
+
     if (( failed )); then die "verify-available FAILED"; fi
     print "verify-available: PASS"
 }
@@ -393,11 +594,12 @@ do_all() {
     do_package
     do_notarize
     do_staple
+    do_appcast
     if [[ "${RELEASE_PUBLISH:-0}" == "1" ]]; then
         do_publish
         do_verify
     else
-        print "release: RELEASE_PUBLISH != 1 — built, signed, notarized, stapled locally but NOT published."
+        print "release: RELEASE_PUBLISH != 1 — built, signed, notarized, stapled, and appcast-signed locally but NOT published."
         do_verify_local
         print "release: to publish and verify availability, re-run with RELEASE_PUBLISH=1."
     fi
@@ -413,6 +615,7 @@ case "$1" in
     package) do_package ;;
     notarize) do_notarize ;;
     staple) do_staple ;;
+    appcast) do_appcast ;;
     publish) do_publish ;;
     verify) do_verify ;;
     verify-local) do_verify_local ;;
