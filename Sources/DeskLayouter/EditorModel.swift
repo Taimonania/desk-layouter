@@ -2,29 +2,6 @@ import AppKit
 import DeskLayouterCore
 import DeskLayouterMacOS
 
-/// The feedback shown after an editor action (Apply or Arrange), so the view can
-/// style success and failure differently and surface actionable detail. Named for
-/// the editor rather than Apply because Arrange — a distinct verb (CONTEXT.md) —
-/// reports through the same channel.
-enum EditorFeedback: Equatable {
-    case none
-    case info(String)
-    case success(String)
-    case failure(String)
-
-    var message: String {
-        switch self {
-        case .none: ""
-        case let .info(text), let .success(text), let .failure(text): text
-        }
-    }
-
-    var isFailure: Bool {
-        if case .failure = self { return true }
-        return false
-    }
-}
-
 /// The pending choice presented when the user selects another Preset while the
 /// working copy has unsaved changes to the current one. Drives the protective
 /// "Update and Switch" / "Discard and Switch" / "Cancel" prompt.
@@ -60,7 +37,6 @@ final class EditorModel: ObservableObject {
     // Add-flow inputs (the searchable installed-app picker plus the chosen
     // destination Desktop).
     @Published var searchText = ""
-    @Published var showRunningOnly = false
     @Published var newAssignmentDesktopNumber = 1
     @Published private(set) var selectedBundleIdentifier: String?
     @Published private(set) var applications: [InstalledApplication] = []
@@ -163,14 +139,13 @@ final class EditorModel: ObservableObject {
         refreshProjection()
     }
 
-    /// The applications the picker shows, filtered by the current search text and
-    /// the "Currently running" toggle. Pure filtering lives in
+    /// The applications the picker shows, filtered by the current search text.
+    /// Pure filtering lives in
     /// `ApplicationCatalog`; this is just the view-facing projection.
     var visibleApplications: [InstalledApplication] {
         ApplicationCatalog.filtered(
             applications,
-            searchText: searchText,
-            runningOnly: showRunningOnly
+            searchText: searchText
         )
     }
 
@@ -216,8 +191,16 @@ final class EditorModel: ObservableObject {
         board.configuration.managedApplications.contains(where: \.hasValidLayout)
     }
 
-    /// The status text shown beneath the board.
-    var statusMessage: String { feedback.message }
+    /// The single status presentation shown above the footer. Latest action
+    /// feedback wins; otherwise it explains pending changes or why Apply is off.
+    var statusPresentation: EditorStatusPresentation {
+        EditorStatusPresentation.resolve(
+            feedback: feedback,
+            pendingChangeCount: pendingChangeCount,
+            applyBlockedExplanation: applyBlockedExplanation,
+            desktopCount: desktopCount
+        )
+    }
 
     /// The real application icon for a card, resolved in the macOS layer.
     func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {

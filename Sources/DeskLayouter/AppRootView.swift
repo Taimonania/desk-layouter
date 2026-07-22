@@ -1,12 +1,5 @@
+import DeskLayouterMacOS
 import SwiftUI
-
-/// The minimum size shared by every full-window surface hosted in the editor
-/// window (the board and the Settings surface), kept in one place so the two
-/// cannot drift apart.
-enum AppWindowMetrics {
-    static let minWidth: CGFloat = 760
-    static let minHeight: CGFloat = 640
-}
 
 /// The window's content root. It swaps between the board (`EditorView`) and the
 /// full-window surfaces — `SettingsView` (issue #71) and the What's-New
@@ -39,7 +32,6 @@ struct AppRootView: View {
                         WelcomeTourOverlay(
                             tour: model.welcomeTour,
                             spotlightFrames: frames,
-                            containerSize: proxy.size,
                             onNext: { model.welcomeNext() },
                             onBack: { model.welcomeBack() },
                             onSkip: { model.dismissWelcome() },

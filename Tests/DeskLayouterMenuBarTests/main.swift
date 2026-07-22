@@ -1,3 +1,4 @@
+import AppKit
 import DeskLayouterMacOS
 
 /// A stand-in for the editor window so the presenter's open/focus/reuse decisions
@@ -44,6 +45,20 @@ struct MenuBarTestRunner {
                 terminate: { terminations += 1 }
             )
             return (presenter, { made }, { terminations })
+        }
+
+        // Editor-window configuration — the initial content size is deliberately
+        // larger than the minimum and resizing remains enabled.
+        do {
+            check(
+                "the default editor window is 1024 by 640",
+                AppWindowConfiguration.defaultWidth == 1024 && AppWindowConfiguration.defaultHeight == 640,
+                "got \(AppWindowConfiguration.defaultWidth) x \(AppWindowConfiguration.defaultHeight)"
+            )
+            check(
+                "the editor window remains user-resizable",
+                AppWindowConfiguration.styleMask.contains(.resizable)
+            )
         }
 
         // Status-item action — the first open creates exactly one window and brings

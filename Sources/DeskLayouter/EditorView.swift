@@ -72,14 +72,13 @@ struct EditorView: View {
                 }
                 .frame(maxHeight: .infinity)
 
-                applyBar
-                feedback
-                versionFooter
+                statusArea
+                footer
             }
             .padding(Self.boardPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(minWidth: AppWindowMetrics.minWidth, minHeight: AppWindowMetrics.minHeight)
+        .frame(minWidth: AppWindowConfiguration.minWidth, minHeight: AppWindowConfiguration.minHeight)
         .sheet(item: $editingLayoutCard) { card in
             LayoutEditorView(model: model, card: currentCard(for: card) ?? card)
         }
@@ -188,34 +187,31 @@ struct EditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            // The header controls are icon-only with hover tooltips (issue #71),
-            // matching the gearshape Settings button. Each keeps its `.help` tooltip
-            // and `.accessibilityLabel` so the meaning survives without a visible
-            // title.
+            // Icon-only top controls use the shared app-owned 200 ms tooltip.
             Button {
                 openHelp()
             } label: {
                 Label("Help", systemImage: "questionmark.circle")
             }
             .labelStyle(.iconOnly)
-            .help("Show the Welcome tour")
-            .accessibilityLabel("Show the Welcome tour")
+            .hoverTooltip("Welcome tour")
+            .accessibilityLabel("Welcome tour")
             Button {
                 openSettings()
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }
             .labelStyle(.iconOnly)
-            .help("Open Settings")
-            .accessibilityLabel("Open Settings")
+            .hoverTooltip("Settings")
+            .accessibilityLabel("Settings")
             Button {
                 model.refresh()
             } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .labelStyle(.iconOnly)
-            .help("Re-read the current Desktops and installed applications")
-            .accessibilityLabel("Refresh Desktops and applications")
+            .hoverTooltip("Refresh Desktops and apps")
+            .accessibilityLabel("Refresh Desktops and apps")
             // Quit sits beside Refresh now that the menu-bar icon opens the editor
             // directly instead of presenting a menu (issue #40). Command-Q triggers
             // it while the editor is active. Quitting is immediate and unconfirmed;
@@ -227,7 +223,7 @@ struct EditorView: View {
             }
             .labelStyle(.iconOnly)
             .keyboardShortcut("q", modifiers: .command)
-            .help("Quit Desk Layouter")
+            .hoverTooltip("Quit Desk Layouter")
             .accessibilityLabel("Quit Desk Layouter")
         }
     }
@@ -759,10 +755,6 @@ struct EditorView: View {
         HStack(spacing: 10) {
             searchField
                 .welcomeAnchor(.searchField)
-            Toggle("Running only", isOn: $model.showRunningOnly)
-                .toggleStyle(.checkbox)
-                .fixedSize()
-                .disabled(!model.canEditAssignments)
             Text("Add to")
                 .foregroundStyle(.secondary)
             destinationPicker
@@ -897,80 +889,37 @@ struct EditorView: View {
         .accessibilityLabel("Destination Desktop for the new application")
     }
 
-    // MARK: - Apply
-
-    private var applyBar: some View {
-        HStack(spacing: 12) {
-            Button(applyTitle) {
-                model.apply()
-            }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!model.canApply)
-            .welcomeAnchor(.applyButton)
-
-            // Arrange enacts Layouts on live windows. It is separate from Apply
-            // (which writes Assignments) and, unlike Apply, is not gated on pending
-            // changes — setting a Layout never dirties the board (issue #27).
-            Button("Arrange") {
-                model.arrange()
-            }
-            .disabled(!model.canArrange)
-            .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
-            .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
-            .welcomeAnchor(.arrangeButton)
-
-            if let explanation = model.applyBlockedExplanation {
-                Text(explanation)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(explanation)
-            } else if model.pendingChangeCount > 0 {
-                Text("^[\(model.pendingChangeCount) unapplied change](inflect: true)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No changes to apply.")
-                    .font(.callout)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
+    // MARK: - Status + footer actions
 
     private var applyTitle: String {
         model.pendingChangeCount > 0 ? "Apply (\(model.pendingChangeCount))" : "Apply"
     }
 
-    @ViewBuilder
-    private var feedback: some View {
-        if !model.statusMessage.isEmpty {
-            Text(model.statusMessage)
-                .font(.callout)
-                .foregroundStyle(model.feedback.isFailure ? Color.red : Color.primary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    private var statusArea: some View {
+        let status = model.statusPresentation
+        return Text(status.message)
+            .font(.callout)
+            .foregroundStyle(status.isFailure ? Color.red : Color.secondary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
+            .accessibilityLabel("Status: \(status.message)")
     }
 
-    /// The bottom-right version + update control (issue #70). The version string
-    /// comes from `CFBundleShortVersionString` (a `dev` fallback when unbundled),
-    /// and both the clickable version text and the circular-arrow button trigger
-    /// Sparkle's "Check for Updates" flow through the injected closure.
-    private var versionFooter: some View {
+    /// Version and its adjacent update action sit on the left. Apply and Arrange
+    /// share equal width on the right so neither primary action dominates.
+    private var footer: some View {
         let version = AppVersion.current()
-        return HStack(spacing: 6) {
-            Spacer(minLength: 0)
-            Button {
-                checkForUpdates()
-            } label: {
-                Text(version)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Check for updates")
-            .accessibilityLabel("Version \(version), check for updates")
+        return HStack(spacing: 12) {
+            Text(version)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Version \(version)")
 
+            // Only this adjacent control checks for updates; version text is inert.
             Button {
                 checkForUpdates()
             } label: {
@@ -978,8 +927,32 @@ struct EditorView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
-            .help("Check for updates")
+            .hoverTooltip("Check for updates", edge: .above)
             .accessibilityLabel("Check for updates")
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 10) {
+                Button(applyTitle) {
+                    model.apply()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!model.canApply)
+                .frame(maxWidth: .infinity)
+                .welcomeAnchor(.applyButton)
+
+                // Arrange enacts Layouts on live windows and stays independent of
+                // Apply's pending-Assignment gate.
+                Button("Arrange") {
+                    model.arrange()
+                }
+                .disabled(!model.canArrange)
+                .frame(maxWidth: .infinity)
+                .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+                .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+                .welcomeAnchor(.arrangeButton)
+            }
+            .frame(width: 260)
         }
     }
 }

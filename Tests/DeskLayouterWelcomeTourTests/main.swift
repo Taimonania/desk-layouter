@@ -22,7 +22,7 @@ struct WelcomeTourTestRunner {
             let tour = WelcomeTour.onLaunch(hasSeenWelcome: false)
             check(
                 "a fresh install presents Welcome from the first step",
-                tour.isPresented && tour.currentStep == .addApps,
+                tour.isPresented && tour.currentStep == .intro,
                 "presented=\(tour.isPresented) step=\(tour.currentStep)"
             )
         }
@@ -40,8 +40,8 @@ struct WelcomeTourTestRunner {
 
         do {
             let tour = WelcomeTour()
-            check("there are exactly three steps", tour.stepCount == 3, "got \(tour.stepCount)")
-            check("the tour starts on the first step", tour.currentStep == .addApps)
+            check("there are exactly four steps", tour.stepCount == 4, "got \(tour.stepCount)")
+            check("the tour starts on the intro", tour.currentStep == .intro)
             check("a default tour is not presented", !tour.isPresented)
             check("stepIndex is zero on the first step", tour.stepIndex == 0, "got \(tour.stepIndex)")
             check("the first step is flagged first", tour.isFirstStep)
@@ -53,13 +53,16 @@ struct WelcomeTourTestRunner {
         do {
             var tour = WelcomeTour(isPresented: true)
             tour.next()
-            check("next advances to Apply", tour.currentStep == .apply, "got \(tour.currentStep)")
+            check("next advances to Add apps", tour.currentStep == .addApps, "got \(tour.currentStep)")
             check("stepIndex is 1 on the second step", tour.stepIndex == 1)
             check("the middle step is neither first nor last", !tour.isFirstStep && !tour.isLastStep)
             tour.next()
+            check("next advances to Apply", tour.currentStep == .apply, "got \(tour.currentStep)")
+            check("stepIndex is 2 on the third step", tour.stepIndex == 2)
+            tour.next()
             check("next advances to Go further", tour.currentStep == .goFurther, "got \(tour.currentStep)")
-            check("the third step is flagged last", tour.isLastStep)
-            check("stepIndex is 2 on the last step", tour.stepIndex == 2)
+            check("the fourth step is flagged last", tour.isLastStep)
+            check("stepIndex is 3 on the last step", tour.stepIndex == 3)
         }
 
         do {
@@ -76,7 +79,9 @@ struct WelcomeTourTestRunner {
             tour.back()
             check("back retreats to Add apps", tour.currentStep == .addApps)
             tour.back()
-            check("back on the first step is a no-op", tour.currentStep == .addApps)
+            check("back retreats to the intro", tour.currentStep == .intro)
+            tour.back()
+            check("back on the first step is a no-op", tour.currentStep == .intro)
         }
 
         // MARK: - Skip / Done dismissal
@@ -99,12 +104,18 @@ struct WelcomeTourTestRunner {
             var tour = WelcomeTour(isPresented: false, currentStep: .goFurther)
             tour.open()
             check("open presents the tour", tour.isPresented)
-            check("open resets to the first step", tour.currentStep == .addApps, "got \(tour.currentStep)")
+            check("open resets to the complete tour's intro", tour.currentStep == .intro, "got \(tour.currentStep)")
         }
 
         // MARK: - Per-step content + spotlight targets
 
         do {
+            check(
+                "the new intro uses the specified title and copy",
+                WelcomeTour.Step.intro.title == "Welcome to Desk Layouter"
+                    && WelcomeTour.Step.intro.message == "Choose which macOS Desktop each app belongs to and, optionally, where its windows should sit. Design your setup first, then Apply assignments and Arrange windows."
+            )
+            check("the intro has no spotlight targets", WelcomeTour.Step.intro.spotlightTargets.isEmpty)
             check(
                 "Add apps spotlights the search field and destination picker",
                 WelcomeTour.Step.addApps.spotlightTargets == [.searchField, .destinationPicker]

@@ -30,8 +30,7 @@ public struct InstalledApplication: Equatable, Sendable, Identifiable {
 }
 
 /// Pure catalog logic for the app picker: merging installed apps with the
-/// currently-running set, and filtering the merged list by search text and the
-/// "Currently running" toggle.
+/// currently-running set, and filtering the merged list by search text.
 ///
 /// This is the picker's unit-tested seam. It has no filesystem, no NSWorkspace,
 /// and no UI — it operates only on the fabricated `InstalledApplication` values
@@ -90,20 +89,15 @@ public enum ApplicationCatalog {
 
     /// Filters the merged application list for display.
     ///
-    /// When `runningOnly` is true only currently-running applications remain.
     /// When `searchText` is non-empty (ignoring surrounding whitespace) only
     /// applications whose display name contains it, case-insensitively, remain.
-    /// The two filters compose: a search within the running-only subset. Input
-    /// order is preserved.
+    /// Running state is retained solely for the result-row indicator and never
+    /// removes an application. Input order is preserved.
     public static func filtered(
         _ applications: [InstalledApplication],
-        searchText: String,
-        runningOnly: Bool
+        searchText: String
     ) -> [InstalledApplication] {
         var result = applications
-        if runningOnly {
-            result = result.filter(\.isRunning)
-        }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
             result = result.filter { $0.displayName.localizedCaseInsensitiveContains(query) }

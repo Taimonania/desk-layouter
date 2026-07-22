@@ -154,8 +154,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeEditorWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: AppWindowConfiguration.defaultWidth,
+                height: AppWindowConfiguration.defaultHeight
+            ),
+            styleMask: AppWindowConfiguration.styleMask,
             backing: .buffered,
             defer: false
         )
@@ -179,7 +184,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 checkForUpdates: { [weak self] in self?.updaterController.checkForUpdates(nil) }
             )
         )
-        window.setContentSize(NSSize(width: 720, height: 480))
+        window.setContentSize(
+            NSSize(
+                width: AppWindowConfiguration.defaultWidth,
+                height: AppWindowConfiguration.defaultHeight
+            )
+        )
         return window
     }
 }

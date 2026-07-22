@@ -41,7 +41,7 @@ struct ApplicationCatalogTestRunner {
         }
 
         // Merge: a running app that is not among the installed locations is still
-        // included (marked running), so the running-only toggle can offer it.
+        // included and marked running in search results.
         do {
             let merged = ApplicationCatalog.merge(
                 installed: [app("Reader", "com.example.Reader")],
@@ -98,7 +98,7 @@ struct ApplicationCatalogTestRunner {
                 app("Writer", "com.example.Writer"),
                 app("Reader", "com.example.Reader"),
             ]
-            let filtered = ApplicationCatalog.filtered(apps, searchText: "", runningOnly: false)
+            let filtered = ApplicationCatalog.filtered(apps, searchText: "")
             check("filter with empty search returns all apps", filtered == apps, "got \(filtered)")
         }
 
@@ -109,7 +109,7 @@ struct ApplicationCatalogTestRunner {
                 app("Mail", "com.apple.mail"),
                 app("Messages", "com.apple.MobileSMS"),
             ]
-            let filtered = ApplicationCatalog.filtered(apps, searchText: "M", runningOnly: false)
+            let filtered = ApplicationCatalog.filtered(apps, searchText: "M")
             check(
                 "filter matches name case-insensitively",
                 filtered.map(\.displayName) == ["Mail", "Messages"],
@@ -120,7 +120,7 @@ struct ApplicationCatalogTestRunner {
         // Filter: leading/trailing whitespace in the search is ignored.
         do {
             let apps = [app("Safari", "com.apple.Safari"), app("Mail", "com.apple.mail")]
-            let filtered = ApplicationCatalog.filtered(apps, searchText: "  safari  ", runningOnly: false)
+            let filtered = ApplicationCatalog.filtered(apps, searchText: "  safari  ")
             check(
                 "filter trims surrounding whitespace from the search",
                 filtered == [app("Safari", "com.apple.Safari")],
@@ -128,34 +128,20 @@ struct ApplicationCatalogTestRunner {
             )
         }
 
-        // Filter: the running-only toggle keeps only running apps.
+        // Filter: running state is presentation data only. Search retains both
+        // running and stopped apps so the removed Running-only behavior cannot
+        // silently return in the catalog seam.
         do {
             let apps = [
                 app("Safari", "com.apple.Safari", running: true),
                 app("Mail", "com.apple.mail", running: false),
                 app("Notes", "com.apple.Notes", running: true),
             ]
-            let filtered = ApplicationCatalog.filtered(apps, searchText: "", runningOnly: true)
+            let filtered = ApplicationCatalog.filtered(apps, searchText: "")
             check(
-                "filter running-only keeps only running apps",
-                filtered.map(\.displayName) == ["Safari", "Notes"],
-                "got \(filtered.map(\.displayName))"
-            )
-        }
-
-        // Filter: running-only and search compose — a search within the running
-        // subset.
-        do {
-            let apps = [
-                app("Safari", "com.apple.Safari", running: true),
-                app("Mail", "com.apple.mail", running: false),
-                app("Notes", "com.apple.Notes", running: true),
-            ]
-            let filtered = ApplicationCatalog.filtered(apps, searchText: "s", runningOnly: true)
-            check(
-                "filter composes running-only with search text",
-                filtered.map(\.displayName) == ["Safari", "Notes"],
-                "got \(filtered.map(\.displayName))"
+                "filter retains running and stopped apps with their indicators",
+                filtered == apps,
+                "got \(filtered)"
             )
         }
 

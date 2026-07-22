@@ -23,7 +23,7 @@ let package = Package(
             exclude: [
                 "AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift",
                 "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift", "WelcomeTourOverlay.swift",
-                "WhatsNewView.swift", "BundledChangelog.swift",
+                "WhatsNewView.swift", "BundledChangelog.swift", "HoverTooltip.swift",
             ],
             sources: [
                 "SpacesAdapter.swift",
@@ -41,6 +41,9 @@ let package = Package(
                 "EditorPresenter.swift",
                 "AppStateStore.swift",
                 "AppNavigation.swift",
+                "AppWindowConfiguration.swift",
+                "EditorStatusPresentation.swift",
+                "SupportReport.swift",
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
             ]
@@ -69,6 +72,9 @@ let package = Package(
                 "EditorPresenter.swift",
                 "AppStateStore.swift",
                 "AppNavigation.swift",
+                "AppWindowConfiguration.swift",
+                "EditorStatusPresentation.swift",
+                "SupportReport.swift",
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
             ]

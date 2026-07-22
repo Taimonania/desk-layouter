@@ -51,9 +51,6 @@ struct WelcomeTourOverlay: View {
     /// Bounds (in the overlay's coordinate space) of the controls the current step
     /// spotlights, already resolved from the collected anchors.
     let spotlightFrames: [CGRect]
-    /// The overlay's container size, used to place the callout clear of the
-    /// spotlighted controls.
-    let containerSize: CGSize
 
     let onNext: () -> Void
     let onBack: () -> Void
@@ -62,7 +59,8 @@ struct WelcomeTourOverlay: View {
 
     private static let spotlightPadding: CGFloat = 10
     private static let spotlightCornerRadius: CGFloat = 10
-    private static let calloutWidth: CGFloat = 380
+    private static let calloutWidth: CGFloat = 430
+    private static let calloutHeight: CGFloat = 360
 
     var body: some View {
         ZStack {
@@ -110,30 +108,17 @@ struct WelcomeTourOverlay: View {
 
     // MARK: - Callout
 
-    /// Pins the callout to the edge of the window opposite the spotlighted
-    /// controls, so the card never covers what it is describing and never clips.
+    /// Every page uses the same centered card geometry, keeping the explanatory
+    /// copy and bottom navigation stable while spotlight targets change behind it.
     private var calloutLayer: some View {
         callout
-            .frame(width: Self.calloutWidth)
+            .frame(width: Self.calloutWidth, height: Self.calloutHeight)
             .frame(
                 maxWidth: .infinity,
                 maxHeight: .infinity,
-                alignment: calloutAlignment
+                alignment: .center
             )
             .padding(24)
-    }
-
-    /// Places the callout at the bottom when the spotlight sits in the upper part
-    /// of the window, and at the top otherwise. Defaults to the bottom when nothing
-    /// is spotlighted yet.
-    private var calloutAlignment: Alignment {
-        guard let union = spotlightUnion else { return .bottom }
-        return union.midY < containerSize.height * 0.55 ? .bottom : .top
-    }
-
-    private var spotlightUnion: CGRect? {
-        guard let first = spotlightFrames.first else { return nil }
-        return spotlightFrames.dropFirst().reduce(first) { $0.union($1) }
     }
 
     private var callout: some View {
@@ -151,13 +136,28 @@ struct WelcomeTourOverlay: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Spacer(minLength: 8)
+
             HStack(spacing: 10) {
-                progressDots
-                Spacer(minLength: 8)
                 if !tour.isFirstStep {
                     Button("Back") { onBack() }
                         .accessibilityLabel("Back to the previous step")
+                        .frame(width: 52)
+                } else {
+                    // Reserve Back's exact slot without exposing a Back control on
+                    // step 1, so the rest of the row never shifts.
+                    Button("Back") {}
+                        .frame(width: 52)
+                        .hidden()
                 }
+
+                Text("Step \(tour.stepIndex + 1) of \(tour.stepCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                progressDots
+                Spacer(minLength: 8)
+
                 Button("Skip") { onSkip() }
                     .accessibilityLabel("Skip the Welcome tour")
                 // The tour's controls are click-driven and carry no keyboard
@@ -169,9 +169,11 @@ struct WelcomeTourOverlay: View {
                 if tour.isLastStep {
                     Button("Done") { onFinish() }
                         .accessibilityLabel("Finish the Welcome tour")
+                        .frame(width: 56)
                 } else {
                     Button("Next") { onNext() }
                         .accessibilityLabel("Next step")
+                        .frame(width: 56)
                 }
             }
         }
