@@ -10,6 +10,11 @@ struct EditorView: View {
     /// through the same lifecycle seam the menu bar uses (issue #40).
     let quit: () -> Void
 
+    /// Triggers Sparkle's "Check for Updates" flow. Injected so the editor's
+    /// version control routes through the same updater the menu bar uses (issue
+    /// #70); the view stays free of any Sparkle dependency.
+    let checkForUpdates: () -> Void
+
     @State private var dropTargetDesktop: Int?
     @State private var searchFieldWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
@@ -59,6 +64,7 @@ struct EditorView: View {
 
                 applyBar
                 feedback
+                versionFooter
             }
             .padding(Self.boardPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -870,6 +876,37 @@ struct EditorView: View {
                 .foregroundStyle(model.feedback.isFailure ? Color.red : Color.primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The bottom-right version + update control (issue #70). The version string
+    /// comes from `CFBundleShortVersionString` (a `dev` fallback when unbundled),
+    /// and both the clickable version text and the circular-arrow button trigger
+    /// Sparkle's "Check for Updates" flow through the injected closure.
+    private var versionFooter: some View {
+        let version = AppVersion.current()
+        return HStack(spacing: 6) {
+            Spacer(minLength: 0)
+            Button {
+                checkForUpdates()
+            } label: {
+                Text(version)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Check for updates")
+            .accessibilityLabel("Version \(version), check for updates")
+
+            Button {
+                checkForUpdates()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("Check for updates")
+            .accessibilityLabel("Check for updates")
         }
     }
 }

@@ -36,6 +36,7 @@ test:
 	swift run DeskLayouterDisplayNameTests
 	swift run DeskLayouterMenuBarTests
 	swift run DeskLayouterUnavailableTests
+	swift run DeskLayouterVersionTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh

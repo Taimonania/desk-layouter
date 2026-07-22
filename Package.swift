@@ -164,5 +164,10 @@ let package = Package(
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterUnavailableTests"
         ),
+        .executableTarget(
+            name: "DeskLayouterVersionTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterVersionTests"
+        ),
     ]
 )
