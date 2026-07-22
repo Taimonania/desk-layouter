@@ -45,6 +45,16 @@ struct PendingPresetDeletion: Identifiable, Equatable {
     var id: UUID { presetID }
 }
 
+/// The pending confirmation shown before the selected Preset is restored over
+/// its edited working copy. Carries the stable identity as well as the visible
+/// name so confirming always targets the Preset the prompt named.
+struct PendingPresetRevert: Identifiable, Equatable {
+    let presetID: UUID
+    let presetName: String
+
+    var id: UUID { presetID }
+}
+
 @MainActor
 final class EditorModel: ObservableObject {
     // Add-flow inputs (the searchable installed-app picker plus the chosen
@@ -73,6 +83,7 @@ final class EditorModel: ObservableObject {
     @Published private(set) var selectedPresetID: UUID
     @Published var pendingPresetSwitch: PendingPresetSwitch?
     @Published var pendingPresetDeletion: PendingPresetDeletion?
+    @Published var pendingPresetRevert: PendingPresetRevert?
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
@@ -585,25 +596,47 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Presets
 
-    /// The real Preset name to show for the current selection in the header.
-    var presetSelectionName: String {
+    /// The real, undecorated name of the selected Preset. Prompts and rename
+    /// editing use this value so the Preset-dirty marker remains presentation,
+    /// never part of the stored name.
+    var selectedPresetName: String {
         presetLibrary.preset(for: selectedPresetID)?.name ?? ""
     }
 
-    /// True when a Preset is selected, so the explicit "Update Preset" action has
-    /// a target. With no selection there is nothing to update — the user saves a
-    /// new Preset instead.
-    var canUpdateSelectedPreset: Bool {
-        presetLibrary.preset(for: selectedPresetID) != nil
+    /// Whether the working board differs from the selected Preset's stored
+    /// snapshot. `PresetLibrary.isModified` delegates to the existing
+    /// `Preset.matches` comparison, which includes Assignments and Layouts but
+    /// ignores Apply bookkeeping such as pending removals.
+    var isSelectedPresetModified: Bool {
+        presetLibrary.isModified(board.configuration, from: selectedPresetID)
     }
+
+    /// The selector's visible value. A dirty working copy stays attached to its
+    /// selected Preset and is decorated rather than replaced by a custom state.
+    var presetSelectionLabel: String {
+        guard isSelectedPresetModified else { return selectedPresetName }
+        return "● \(selectedPresetName) — Edited"
+    }
+
+    /// True only while the working board differs from its selected Preset, so an
+    /// explicit update cannot be offered for an already matching snapshot.
+    var canUpdateSelectedPreset: Bool {
+        isSelectedPresetModified
+    }
+
+    /// Revert abandons edits to the working copy, so it shares the same
+    /// Preset-dirty gate as Update and is independent of Apply-dirty.
+    var canRevertSelectedPreset: Bool { isSelectedPresetModified }
 
     /// True when a resolvable Preset is selected, so the header's Rename action has
     /// a target.
-    var canRenameSelectedPreset: Bool { canUpdateSelectedPreset }
+    var canRenameSelectedPreset: Bool {
+        presetLibrary.preset(for: selectedPresetID) != nil
+    }
 
     /// True when the selected Preset can be deleted without emptying the library.
     var canDeleteSelectedPreset: Bool {
-        canUpdateSelectedPreset && presetLibrary.presets.count > 1
+        canRenameSelectedPreset && presetLibrary.presets.count > 1
     }
 
     /// Saves the current working board as a new Preset under the given name,
@@ -752,6 +785,10 @@ final class EditorModel: ObservableObject {
             feedback = .info("Select a Preset to update, or save the board as a new Preset.")
             return
         }
+        guard isSelectedPresetModified else {
+            feedback = .info("Preset \"\(existing.name)\" already matches the current board.")
+            return
+        }
         var updatedLibrary = presetLibrary
         updatedLibrary.update(id: selectedPresetID, managedApplications: board.configuration.managedApplications)
         do {
@@ -762,6 +799,56 @@ final class EditorModel: ObservableObject {
         } catch {
             feedback = .failure("Could not update the Preset: \(error.localizedDescription)")
         }
+    }
+
+    /// Opens the Revert confirmation for the selected Preset. A matching board
+    /// has nothing to abandon, so the action remains disabled and this guard keeps
+    /// programmatic calls harmless as well.
+    func requestRevertSelectedPreset() {
+        guard
+            canRevertSelectedPreset,
+            let preset = presetLibrary.preset(for: selectedPresetID)
+        else {
+            return
+        }
+        pendingPresetRevert = PendingPresetRevert(
+            presetID: preset.id,
+            presetName: preset.name
+        )
+    }
+
+    /// Restores the confirmed Preset snapshot over the working copy. The pure
+    /// transformation preserves the applied baseline, so this can change the
+    /// existing Apply-dirty count but can never Apply or Arrange. Persisting the
+    /// resulting board only makes the reverted working copy survive relaunch.
+    func confirmRevertSelectedPreset() {
+        guard
+            let pending = pendingPresetRevert,
+            pending.presetID == selectedPresetID,
+            presetLibrary.preset(for: pending.presetID) != nil
+        else {
+            pendingPresetRevert = nil
+            return
+        }
+        board = PresetEditing.revert(
+            to: pending.presetID,
+            library: presetLibrary,
+            board: board
+        )
+        pendingPresetRevert = nil
+        do {
+            try boardStateStore.save(board)
+            refreshProjection()
+            feedback = .success("Reverted to Preset \"\(pending.presetName)\". Nothing was Applied or Arranged.")
+        } catch {
+            refreshProjection()
+            feedback = .failure("Reverted to Preset \"\(pending.presetName)\", but could not store the board: \(error.localizedDescription)")
+        }
+    }
+
+    /// Dismisses the Revert confirmation with the working copy untouched.
+    func cancelRevertSelectedPreset() {
+        pendingPresetRevert = nil
     }
 
     /// Renames the selected Preset, reusing the same validation as Preset creation
@@ -848,7 +935,7 @@ final class EditorModel: ObservableObject {
             do {
                 try boardStateStore.save(board)
                 refreshProjection()
-                feedback = .success("Deleted Preset \"\(existing.name)\". This board is now associated with \"\(presetSelectionName)\".")
+                feedback = .success("Deleted Preset \"\(existing.name)\". This board is now associated with \"\(selectedPresetName)\".")
             } catch {
                 refreshProjection()
                 feedback = .failure("Deleted Preset \"\(existing.name)\", but could not store the board: \(error.localizedDescription)")

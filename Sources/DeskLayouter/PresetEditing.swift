@@ -1,18 +1,35 @@
 import DeskLayouterCore
 
-/// Renames and deletes saved ``Preset``s with the same persist-copy-first-then-commit
-/// discipline as `PresetSwitch`.
+/// Restores working copies and renames or deletes saved ``Preset``s with the same
+/// value-first discipline as `PresetSwitch`.
 ///
-/// This concerns **Preset storage only**. Like switching, it is deliberately
-/// isolated from Apply and Arrange: renaming and deleting never enact Assignments,
-/// never change the applied baseline, and never move windows. Every mutation is
-/// prepared on a copy and persisted *before* it is returned for the caller to
-/// commit in memory, so a persistence failure throws and leaves both the stored
-/// library and the working board exactly as they were — a reported failure never
-/// silently loses a Preset or the working board. `EditorModel` wires the UI to
-/// these pure transformations so the full protocol is exercised without a running
-/// app.
+/// These transformations are deliberately isolated from Apply and Arrange: they
+/// never enact Assignments, never change the applied baseline, and never move
+/// windows. Library mutations are prepared on a copy and persisted *before* they
+/// are returned for the caller to commit in memory, so a persistence failure
+/// throws and leaves both the stored library and the working board exactly as
+/// they were. Revert likewise returns a new board value while leaving its input
+/// untouched. `EditorModel` wires the UI to these pure transformations so the
+/// full protocol is exercised without a running app.
 public enum PresetEditing {
+    /// Restores the selected Preset's stored snapshot over the working board.
+    ///
+    /// The returned board keeps its true applied baseline, so Revert remains
+    /// independent of Apply-dirty: a restored snapshot may still have Assignments
+    /// waiting to be Applied, or it may become Apply-clean. The selected-Preset
+    /// association is retained and the Preset library is never changed. This pure
+    /// transformation cannot Apply Assignments or Arrange windows.
+    public static func revert(
+        to id: Preset.ID,
+        library: PresetLibrary,
+        board: BoardState
+    ) -> BoardState {
+        guard let preset = library.preset(for: id) else { return board }
+        var revertedBoard = board
+        revertedBoard.load(configuration: preset.configuration, selectedPresetID: preset.id)
+        return revertedBoard
+    }
+
     /// Renames the Preset with the given identity to `newName`, reusing the exact
     /// creation validation (non-empty, trimmed, case-insensitive uniqueness) and
     /// preserving the Preset's complete stored snapshot.

@@ -34,6 +34,81 @@ struct PresetEditingTestRunner {
 
         struct SaveFailed: Error {}
 
+        // MARK: - Revert
+
+        // Revert restores the selected Preset over the working copy while keeping
+        // the true applied baseline and selected-Preset association. Preset-dirty
+        // returns to clean, while Apply-dirty remains whatever the restored board
+        // versus macOS baseline says it is.
+        do {
+            let (library, work, _) = freshLibrary()
+            let baseline = [
+                "com.example.Writer": 3,
+                "com.example.Legacy": 4,
+            ]
+            let editedApps = [
+                app("Writer", "com.example.Writer", desktop: 2),
+                app("Mail", "com.example.Mail", desktop: 1),
+            ]
+            let board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: editedApps),
+                appliedBaseline: baseline,
+                selectedPresetID: work.id
+            )
+
+            check("an edited working copy is Preset-dirty before Revert", library.isModified(board.configuration, from: work.id))
+            let reverted = PresetEditing.revert(to: work.id, library: library, board: board)
+            check("Revert restores the selected Preset snapshot", work.matches(reverted.configuration))
+            check("Revert returns the working copy to Preset-clean", !library.isModified(reverted.configuration, from: work.id))
+            check("Revert keeps the working copy attached to the selected Preset", reverted.selectedPresetID == work.id)
+            check("Revert never changes the applied baseline", reverted.appliedBaseline == baseline, "got \(reverted.appliedBaseline)")
+            check("Revert leaves restored Assignments Apply-dirty when they differ from macOS", reverted.pendingChanges == ["com.example.Legacy", "com.example.Reader", "com.example.Writer"], "got \(reverted.pendingChanges)")
+            check("Revert seeds deletion of an applied app absent from the Preset", reverted.configuration.pendingRemovals == ["com.example.Legacy"])
+            check("Revert never mutates the stored Preset", library.preset(for: work.id)?.managedApplications == workApps)
+        }
+
+        // Preset-dirty and Apply-dirty are independent in both directions: a
+        // Layout-only edit is Preset-dirty but Apply-clean, while a board matching
+        // its Preset can still contain unapplied Assignment changes.
+        do {
+            let layout = Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0))
+            var library = PresetLibrary()
+            let preset = try! library.add(
+                name: "Focus",
+                managedApplications: [app("Writer", "com.example.Writer", desktop: 1)]
+            )
+
+            var layoutEdited = BoardState(configuration: preset.configuration, selectedPresetID: preset.id)
+            layoutEdited.setLayout(layout, forBundleIdentifier: "com.example.Writer")
+            check("a Layout-only edit is Preset-dirty", library.isModified(layoutEdited.configuration, from: preset.id))
+            check("a Layout-only edit remains Apply-clean", !layoutEdited.isDirty)
+
+            let applyDirty = BoardState(
+                configuration: preset.configuration,
+                appliedBaseline: ["com.example.Writer": 2],
+                selectedPresetID: preset.id
+            )
+            check("a board matching its Preset is Preset-clean", !library.isModified(applyDirty.configuration, from: preset.id))
+            check("a Preset-clean board can remain Apply-dirty", applyDirty.isDirty)
+        }
+
+        // Confirmation cancellation performs no transformation at all. Revert's
+        // value semantics also leave the original working board available and
+        // untouched until the caller commits the returned copy.
+        do {
+            let (library, work, _) = freshLibrary()
+            let board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [
+                    app("Writer", "com.example.Writer", desktop: 3),
+                    app("Reader", "com.example.Reader", desktop: 2),
+                ]),
+                selectedPresetID: work.id
+            )
+            let before = board
+            _ = PresetEditing.revert(to: work.id, library: library, board: board)
+            check("cancelling Revert keeps the working copy untouched", board == before)
+        }
+
         // MARK: - Rename
 
         // Successful rename: the name changes, the snapshot is preserved, and the

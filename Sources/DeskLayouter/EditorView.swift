@@ -90,6 +90,29 @@ struct EditorView: View {
             renamePresetSheet
         }
         .confirmationDialog(
+            presetRevertTitle,
+            isPresented: Binding(
+                get: { model.pendingPresetRevert != nil },
+                set: { presenting in if !presenting { model.cancelRevertSelectedPreset() } }
+            ),
+            titleVisibility: .visible,
+            presenting: model.pendingPresetRevert
+        ) { pending in
+            Button("Revert Changes", role: .destructive) {
+                model.confirmRevertSelectedPreset()
+            }
+            .keyboardShortcut(.defaultAction)
+            .accessibilityLabel("Revert changes to Preset \(pending.presetName)")
+
+            Button("Cancel", role: .cancel) {
+                model.cancelRevertSelectedPreset()
+            }
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Cancel reverting changes to Preset \(pending.presetName)")
+        } message: { pending in
+            Text("This replaces the current board with the stored Preset \"\(pending.presetName)\". Nothing is Applied or Arranged, and no windows move.")
+        }
+        .confirmationDialog(
             presetDeletionTitle,
             isPresented: Binding(
                 get: { model.pendingPresetDeletion != nil },
@@ -232,12 +255,12 @@ struct EditorView: View {
                     }
                 }
             } label: {
-                Text(model.presetSelectionName)
+                Text(model.presetSelectionLabel)
                     .frame(minWidth: 120, alignment: .leading)
             }
             .frame(width: 220)
             .help("Load a saved Preset as a working copy. Loading never Applies or Arranges.")
-            .accessibilityLabel("Preset selector, currently \(model.presetSelectionName)")
+            .accessibilityLabel("Preset selector, currently \(model.presetSelectionLabel)")
 
             Button {
                 newPresetName = ""
@@ -258,8 +281,17 @@ struct EditorView: View {
             .help("Update the selected Preset to match the current board")
             .accessibilityLabel("Update the selected Preset")
 
+            Button(role: .destructive) {
+                model.requestRevertSelectedPreset()
+            } label: {
+                Label("Revert", systemImage: "arrow.uturn.backward")
+            }
+            .disabled(!model.canRevertSelectedPreset)
+            .help("Restore the selected Preset over the current board after confirmation")
+            .accessibilityLabel("Revert changes to the selected Preset")
+
             Button {
-                renamePresetName = model.presetSelectionName
+                renamePresetName = model.selectedPresetName
                 renamePresetError = nil
                 showingRenamePresetSheet = true
             } label: {
@@ -280,6 +312,13 @@ struct EditorView: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    private var presetRevertTitle: String {
+        if let pending = model.pendingPresetRevert {
+            return "Revert changes to \"\(pending.presetName)\"?"
+        }
+        return "Revert changes to this Preset?"
     }
 
     private var presetDeletionTitle: String {
