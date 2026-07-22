@@ -20,7 +20,10 @@ let package = Package(
             name: "DeskLayouterMacOS",
             dependencies: ["DeskLayouterCore"],
             path: "Sources/DeskLayouter",
-            exclude: ["AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift"],
+            exclude: [
+                "AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift",
+                "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift",
+            ],
             sources: [
                 "SpacesAdapter.swift",
                 "DisplayResolution.swift",
@@ -34,6 +37,8 @@ let package = Package(
                 "DesktopArrangePlan.swift",
                 "ArrangeTransitionCoordinator.swift",
                 "EditorPresenter.swift",
+                "AppStateStore.swift",
+                "AppNavigation.swift",
             ]
         ),
         .executableTarget(
@@ -57,6 +62,8 @@ let package = Package(
                 "DesktopArrangePlan.swift",
                 "ArrangeTransitionCoordinator.swift",
                 "EditorPresenter.swift",
+                "AppStateStore.swift",
+                "AppNavigation.swift",
             ]
         ),
         .executableTarget(
@@ -168,6 +175,11 @@ let package = Package(
             name: "DeskLayouterVersionTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterVersionTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterAppStateTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterAppStateTests"
         ),
     ]
 )

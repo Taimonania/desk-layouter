@@ -15,6 +15,10 @@ struct EditorView: View {
     /// #70); the view stays free of any Sparkle dependency.
     let checkForUpdates: () -> Void
 
+    /// Swaps the window to the full-window Settings screen (issue #71). Injected so
+    /// the board owns none of the navigation state — the root wrapper drives it.
+    let openSettings: () -> Void
+
     @State private var dropTargetDesktop: Int?
     @State private var searchFieldWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
@@ -155,11 +159,24 @@ struct EditorView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+            // The header controls are icon-only with hover tooltips (issue #71),
+            // matching the gearshape Settings button. Each keeps its `.help` tooltip
+            // and `.accessibilityLabel` so the meaning survives without a visible
+            // title.
+            Button {
+                openSettings()
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .labelStyle(.iconOnly)
+            .help("Open Settings")
+            .accessibilityLabel("Open Settings")
             Button {
                 model.refresh()
             } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
+            .labelStyle(.iconOnly)
             .help("Re-read the current Desktops and installed applications")
             .accessibilityLabel("Refresh Desktops and applications")
             // Quit sits beside Refresh now that the menu-bar icon opens the editor
@@ -171,6 +188,7 @@ struct EditorView: View {
             } label: {
                 Label("Quit", systemImage: "power")
             }
+            .labelStyle(.iconOnly)
             .keyboardShortcut("q", modifiers: .command)
             .help("Quit Desk Layouter")
             .accessibilityLabel("Quit Desk Layouter")
