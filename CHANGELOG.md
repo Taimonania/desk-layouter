@@ -6,6 +6,14 @@ highlights (newest first). The app bundles this file and shows the newest
 highlights on the first launch after an upgrade (the What's-New screen); the
 release pipeline derives each GitHub release's notes from the matching section.
 
+## 0.3.0 — 2026-07-22
+
+- Choose a Display for each destination, then arrange applications across all connected Displays in one go.
+- Your layouts remember their Display choices across restarts and upgrades, including layouts created in earlier versions.
+- Destinations on a disconnected Display stay saved and return automatically when that Display reconnects.
+- Settings are easier to scan, with a cleaner, more organized layout.
+- The editor's buttons now line up neatly and stay put instead of shifting around as you work.
+
 ## 0.2.1 — 2026-07-22
 
 - The editor now groups Apply and Arrange together, aligns Preset controls consistently, and keeps hover tooltips fully visible at window edges.
