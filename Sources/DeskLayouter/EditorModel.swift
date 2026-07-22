@@ -179,8 +179,17 @@ final class EditorModel: ObservableObject {
     var canApply: Bool {
         !currentPendingChanges.isEmpty
             && desktopCount > 0
+            && !hasUnavailableDisplayAssignments
             && !hasUnavailableDesktopAssignments
             && pendingDisplayMigration == nil
+    }
+
+    /// True when the one-Display editor cannot resolve every saved Assignment
+    /// against the currently active physical Display. Apply stays blocked so a
+    /// skipped Assignment's existing macOS binding is never treated as a managed
+    /// key to delete.
+    var hasUnavailableDisplayAssignments: Bool {
+        board.hasUnavailableDisplayAssignments(on: latestDesktopSnapshot)
     }
 
     /// True when at least one Assignment targets a Desktop that no longer exists,
@@ -192,6 +201,9 @@ final class EditorModel: ObservableObject {
     /// Desktops, naming exactly which Desktops must be cleared so the user knows
     /// what to fix. `nil` when Apply is not blocked for this reason.
     var applyBlockedExplanation: String? {
+        if hasUnavailableDisplayAssignments {
+            return "Apply is disabled: one or more Assignments target a physical Display that is not currently available. Nothing is dropped — reconnect that Display to Apply these Assignments."
+        }
         guard hasUnavailableDesktopAssignments else { return nil }
         let numbers = boardProjection.unavailableDesktopNumbers
         let list = numbers.map(String.init).joined(separator: ", ")

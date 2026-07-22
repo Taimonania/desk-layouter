@@ -30,13 +30,45 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
     public init(
         bundleIdentifier: String,
         displayName: String,
-        display: DisplayIdentity? = nil,
+        display: DisplayIdentity,
         desktopNumber: Int,
         layout: Layout? = nil
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
         self.display = display
+        self.desktopNumber = desktopNumber
+        self.layout = layout
+    }
+
+    /// Explicit construction seam for tests and importers modelling data written
+    /// before physical Display identity existed. Ordinary new Assignments must use
+    /// the initializer above and supply a Display.
+    public static func legacy(
+        bundleIdentifier: String,
+        displayName: String,
+        desktopNumber: Int,
+        layout: Layout? = nil
+    ) -> ManagedApplication {
+        ManagedApplication(
+            bundleIdentifier: bundleIdentifier,
+            displayName: displayName,
+            legacyDisplay: nil,
+            desktopNumber: desktopNumber,
+            layout: layout
+        )
+    }
+
+    init(
+        bundleIdentifier: String,
+        displayName: String,
+        legacyDisplay: DisplayIdentity?,
+        desktopNumber: Int,
+        layout: Layout? = nil
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.displayName = displayName
+        display = legacyDisplay
         self.desktopNumber = desktopNumber
         self.layout = layout
     }
@@ -68,9 +100,15 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
 
     /// The managed application's Assignment, as consumed by the planner.
     public var assignment: Assignment {
-        Assignment(
+        if let display {
+            return Assignment(
+                bundleIdentifier: bundleIdentifier,
+                display: display,
+                desktopNumber: desktopNumber
+            )
+        }
+        return Assignment.legacy(
             bundleIdentifier: bundleIdentifier,
-            display: display,
             desktopNumber: desktopNumber
         )
     }

@@ -55,7 +55,7 @@ struct StubScreenGeometry: ScreenGeometryProviding {
 }
 
 func app(_ bundleID: String, layout: Layout?) -> ManagedApplication {
-    ManagedApplication(
+    ManagedApplication.legacy(
         bundleIdentifier: bundleID,
         displayName: bundleID,
         desktopNumber: 1,

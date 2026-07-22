@@ -37,17 +37,6 @@ public struct DisplayIdentity: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-/// The semantic destination stored by one Assignment.
-public struct DesktopAddress: Codable, Equatable, Sendable {
-    public let display: DisplayIdentity
-    public let desktopNumber: Int
-
-    public init(display: DisplayIdentity, desktopNumber: Int) {
-        self.display = display
-        self.desktopNumber = desktopNumber
-    }
-}
-
 /// What the most recent successful Apply wrote for one managed application.
 ///
 /// The semantic destination lets the board detect user edits. The concrete UUID

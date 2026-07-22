@@ -18,7 +18,7 @@ struct BoardStateTestRunner {
         }
 
         func app(_ name: String, _ bundle: String, desktop: Int) -> ManagedApplication {
-            ManagedApplication(bundleIdentifier: bundle, displayName: name, desktopNumber: desktop)
+            ManagedApplication.legacy(bundleIdentifier: bundle, displayName: name, desktopNumber: desktop)
         }
 
         // Clean: a board whose working configuration matches the applied baseline

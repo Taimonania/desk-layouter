@@ -31,7 +31,7 @@ struct MigrationTestRunner {
             rowSpan: .single(0)
         )
         let presetID = UUID()
-        let legacyApplication = ManagedApplication(
+        let legacyApplication = ManagedApplication.legacy(
             bundleIdentifier: "com.example.Writer",
             displayName: "Writer",
             desktopNumber: 2,
@@ -260,6 +260,31 @@ struct MigrationTestRunner {
                 configuration.managedApplications.count == 1
                     && configuration.managedApplications.first?.display == secondDisplay
                     && configuration.managedApplications.first?.desktopNumber == 2
+            )
+        }
+
+        // In this one-logical-Display slice, an Assignment for another physical
+        // Display must block Apply rather than being skipped and then deleted by
+        // the adapter's managed-key reconciliation.
+        do {
+            let application = ManagedApplication(
+                bundleIdentifier: "com.example.External",
+                displayName: "External",
+                display: secondDisplay,
+                desktopNumber: 1
+            )
+            let board = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [application])
+            )
+            check(
+                "an Assignment for another physical Display blocks Apply resolution",
+                board.hasUnavailableDisplayAssignments(on: snapshot)
+            )
+            check(
+                "an Assignment for its active physical Display remains resolvable",
+                !board.hasUnavailableDisplayAssignments(
+                    on: DesktopSnapshot(display: secondDisplay, orderedDesktopUUIDs: ["S1"])
+                )
             )
         }
 

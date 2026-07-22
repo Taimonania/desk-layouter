@@ -19,7 +19,7 @@ struct PresetEditingTestRunner {
         }
 
         func app(_ name: String, _ bundle: String, desktop: Int, layout: Layout? = nil) -> ManagedApplication {
-            ManagedApplication(bundleIdentifier: bundle, displayName: name, desktopNumber: desktop, layout: layout)
+            ManagedApplication.legacy(bundleIdentifier: bundle, displayName: name, desktopNumber: desktop, layout: layout)
         }
 
         let workApps = [app("Writer", "com.example.Writer", desktop: 1), app("Reader", "com.example.Reader", desktop: 2)]

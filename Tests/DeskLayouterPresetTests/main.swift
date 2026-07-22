@@ -18,7 +18,7 @@ struct PresetTestRunner {
         }
 
         func app(_ name: String, _ bundle: String, desktop: Int, layout: Layout? = nil) -> ManagedApplication {
-            ManagedApplication(bundleIdentifier: bundle, displayName: name, desktopNumber: desktop, layout: layout)
+            ManagedApplication.legacy(bundleIdentifier: bundle, displayName: name, desktopNumber: desktop, layout: layout)
         }
 
         // Creation: saving the current board captures every managed application,

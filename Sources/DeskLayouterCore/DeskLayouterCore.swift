@@ -6,11 +6,32 @@ public struct Assignment: Equatable, Sendable {
 
     public init(
         bundleIdentifier: String,
-        display: DisplayIdentity? = nil,
+        display: DisplayIdentity,
         desktopNumber: Int
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.display = display
+        self.desktopNumber = desktopNumber
+    }
+
+    public static func legacy(
+        bundleIdentifier: String,
+        desktopNumber: Int
+    ) -> Assignment {
+        Assignment(
+            bundleIdentifier: bundleIdentifier,
+            legacyDisplay: nil,
+            desktopNumber: desktopNumber
+        )
+    }
+
+    private init(
+        bundleIdentifier: String,
+        legacyDisplay: DisplayIdentity?,
+        desktopNumber: Int
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        display = legacyDisplay
         self.desktopNumber = desktopNumber
     }
 }

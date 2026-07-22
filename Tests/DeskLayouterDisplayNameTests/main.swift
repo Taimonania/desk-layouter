@@ -69,7 +69,7 @@ struct DisplayNameTestRunner {
         do {
             // A legacy stored Assignment whose display name still ends in ".app"
             // must render cleanly without any manual recreation.
-            let managed = ManagedApplication(
+            let managed = ManagedApplication.legacy(
                 bundleIdentifier: "com.apple.Safari",
                 displayName: "Safari.app",
                 desktopNumber: 2

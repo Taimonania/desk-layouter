@@ -253,7 +253,7 @@ struct LayoutTestRunner {
                 columnSpan: .single(0),
                 rowSpan: .single(2)
             )
-            let app = ManagedApplication(
+            let app = ManagedApplication.legacy(
                 bundleIdentifier: "com.example.Full",
                 displayName: "Full",
                 desktopNumber: 1,
@@ -368,7 +368,7 @@ struct LayoutTestRunner {
                 columnSpan: .single(2),
                 rowSpan: LayoutSpan(start: 1, end: 3)
             )
-            let app = ManagedApplication(
+            let app = ManagedApplication.legacy(
                 bundleIdentifier: "com.example.Arranged",
                 displayName: "Arranged",
                 desktopNumber: 2,
@@ -386,7 +386,7 @@ struct LayoutTestRunner {
         }
 
         do {
-            let app = ManagedApplication(
+            let app = ManagedApplication.legacy(
                 bundleIdentifier: "com.example.Plain",
                 displayName: "Plain",
                 desktopNumber: 1

@@ -268,6 +268,22 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// Apply has work to do. When false the board is clean and Apply is disabled.
     public var isDirty: Bool { !pendingChanges.isEmpty }
 
+    /// Whether at least one Assignment cannot be resolved on the supplied
+    /// physical Display. Issue #21 still exposes one logical Display at a time,
+    /// so Apply must fail closed when a saved Assignment targets another Display:
+    /// otherwise the planner would omit it and the delete-aware adapter could
+    /// remove its existing macOS binding. The Assignment remains stored for the
+    /// later multi-Display board and recovery slices.
+    public func hasUnavailableDisplayAssignments(on snapshot: DesktopSnapshot?) -> Bool {
+        guard let activeDisplay = snapshot?.display else {
+            return !configuration.managedApplications.isEmpty
+        }
+        return configuration.managedApplications.contains { application in
+            guard let assignedDisplay = application.display else { return true }
+            return !assignedDisplay.identifiesSameDisplay(as: activeDisplay)
+        }
+    }
+
     // MARK: - Transitions
 
     /// Adds an application to the board, or updates its Assignment if it is
@@ -290,7 +306,7 @@ public struct BoardState: Codable, Equatable, Sendable {
             ManagedApplication(
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
-                display: application.display,
+                legacyDisplay: application.display,
                 desktopNumber: desktopNumber,
                 layout: application.layout
             )
@@ -310,7 +326,7 @@ public struct BoardState: Codable, Equatable, Sendable {
             ManagedApplication(
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
-                display: application.display,
+                legacyDisplay: application.display,
                 desktopNumber: application.desktopNumber,
                 layout: layout
             )

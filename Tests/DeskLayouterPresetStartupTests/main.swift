@@ -26,7 +26,7 @@ struct PresetStartupTestRunner {
         }
 
         func app(_ name: String, _ bundle: String, desktop: Int) -> ManagedApplication {
-            ManagedApplication(
+            ManagedApplication.legacy(
                 bundleIdentifier: bundle,
                 displayName: name,
                 desktopNumber: desktop
