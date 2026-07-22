@@ -23,12 +23,12 @@ struct ConfigStoreTestRunner {
         // the source-of-truth config, with no filesystem involved.
         do {
             let configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(
+                ManagedApplication.legacy(
                     bundleIdentifier: "com.example.Writer",
                     displayName: "Writer",
                     desktopNumber: 2
                 ),
-                ManagedApplication(
+                ManagedApplication.legacy(
                     bundleIdentifier: "com.example.Reader",
                     displayName: "Reader",
                     desktopNumber: 1
@@ -50,7 +50,7 @@ struct ConfigStoreTestRunner {
         // identity needed to later compute the owned normalized key.
         do {
             let configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(
+                ManagedApplication.legacy(
                     bundleIdentifier: "com.Example.MixedCase",
                     displayName: "Mixed Case",
                     desktopNumber: 3
@@ -70,14 +70,14 @@ struct ConfigStoreTestRunner {
         // the same order they were added.
         do {
             let configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
-                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
             ])
             check(
                 "configuration derives Assignments for the planner",
                 configuration.assignments == [
-                    Assignment(bundleIdentifier: "com.example.A", desktopNumber: 1),
-                    Assignment(bundleIdentifier: "com.example.B", desktopNumber: 2),
+                    Assignment.legacy(bundleIdentifier: "com.example.A", desktopNumber: 1),
+                    Assignment.legacy(bundleIdentifier: "com.example.B", desktopNumber: 2),
                 ],
                 "got \(configuration.assignments)"
             )
@@ -88,15 +88,15 @@ struct ConfigStoreTestRunner {
         // managed app is assigned to exactly one Desktop.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ])
             configuration.upsert(
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 4)
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 4)
             )
             check(
                 "upsert replaces an existing managed app rather than duplicating",
                 configuration.managedApplications == [
-                    ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 4),
+                    ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 4),
                 ],
                 "got \(configuration.managedApplications)"
             )
@@ -107,14 +107,14 @@ struct ConfigStoreTestRunner {
         // the next Apply.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
-                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
             ])
             configuration.remove(bundleIdentifier: "com.example.A")
             check(
                 "remove drops only the named managed app",
                 configuration.managedApplications == [
-                    ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                    ManagedApplication.legacy(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
                 ],
                 "got \(configuration.managedApplications)"
             )
@@ -124,13 +124,13 @@ struct ConfigStoreTestRunner {
         // records no pending removal.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ])
             configuration.remove(bundleIdentifier: "com.example.Unknown")
             check(
                 "removing an unknown bundle identifier changes nothing",
                 configuration.managedApplications == [
-                    ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                    ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
                 ] && configuration.pendingRemovals.isEmpty,
                 "got \(configuration.managedApplications), pending \(configuration.pendingRemovals)"
             )
@@ -141,8 +141,8 @@ struct ConfigStoreTestRunner {
         // delete a removed app's key even though it is no longer managed.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
-                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
             ])
             configuration.remove(bundleIdentifier: "com.example.A")
             check(
@@ -161,11 +161,11 @@ struct ConfigStoreTestRunner {
         // key is not deleted on the next Apply.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ])
             configuration.remove(bundleIdentifier: "com.example.A")
             configuration.upsert(
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 3)
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 3)
             )
             check(
                 "re-adding a pending-removal app cancels the removal",
@@ -179,7 +179,7 @@ struct ConfigStoreTestRunner {
         // deleted again.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ])
             configuration.remove(bundleIdentifier: "com.example.A")
             configuration.clearPendingRemovals()
@@ -195,8 +195,8 @@ struct ConfigStoreTestRunner {
         // quitting the app before Apply. Older files without the key still load.
         do {
             var configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
-                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
             ])
             configuration.remove(bundleIdentifier: "com.example.A")
             let decoded = try? ConfigurationSerialization.decode(
@@ -242,8 +242,8 @@ struct ConfigStoreTestRunner {
             let fileURL = directory.appendingPathComponent("configuration.json")
             let store = ConfigurationStore(fileURL: fileURL)
             let configuration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.Writer", displayName: "Writer", desktopNumber: 2),
-                ManagedApplication(bundleIdentifier: "com.example.Reader", displayName: "Reader", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.Writer", displayName: "Writer", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.Reader", displayName: "Reader", desktopNumber: 1),
             ])
 
             var reloaded: DeskLayouterConfiguration?
@@ -274,10 +274,10 @@ struct ConfigStoreTestRunner {
                 fileURL: directory.appendingPathComponent("configuration.json")
             )
             let first = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ])
             let second = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.B", displayName: "B", desktopNumber: 2),
             ])
             var reloaded: DeskLayouterConfiguration?
             do {
@@ -305,7 +305,7 @@ struct ConfigStoreTestRunner {
                 fileURL: directory.appendingPathComponent("board-state.json")
             )
             var board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ]))
             board.move(bundleIdentifier: "com.example.A", toDesktop: 2)
 
@@ -342,7 +342,7 @@ struct ConfigStoreTestRunner {
             let legacyURL = directory.appendingPathComponent("configuration.json")
             let legacyStore = ConfigurationStore(fileURL: legacyURL)
             let legacyConfiguration = DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.Legacy", displayName: "Legacy", desktopNumber: 2),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.Legacy", displayName: "Legacy", desktopNumber: 2),
             ])
             let store = BoardStateStore(
                 fileURL: directory.appendingPathComponent("board-state.json"),
@@ -377,12 +377,12 @@ struct ConfigStoreTestRunner {
                 legacyConfigurationStore: legacyStore
             )
             let board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.Current", displayName: "Current", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.Current", displayName: "Current", desktopNumber: 1),
             ]))
             var loaded: BoardState?
             do {
                 try legacyStore.save(DeskLayouterConfiguration(managedApplications: [
-                    ManagedApplication(bundleIdentifier: "com.example.Legacy", displayName: "Legacy", desktopNumber: 3),
+                    ManagedApplication.legacy(bundleIdentifier: "com.example.Legacy", displayName: "Legacy", desktopNumber: 3),
                 ]))
                 try store.save(board)
                 loaded = try store.load()
@@ -415,7 +415,7 @@ struct ConfigStoreTestRunner {
             var library = PresetLibrary()
             let layout = Layout(horizontalDivision: .halves, verticalDivision: .halves, columnSpan: .single(0), rowSpan: .single(0))
             _ = try? library.add(name: "Work", managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.Writer", displayName: "Writer", desktopNumber: 1, layout: layout),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.Writer", displayName: "Writer", desktopNumber: 1, layout: layout),
             ])
             _ = try? library.add(name: "Play", managedApplications: [])
 
@@ -456,7 +456,7 @@ struct ConfigStoreTestRunner {
             let store = BoardStateStore(fileURL: directory.appendingPathComponent("board-state.json"))
             let presetID = UUID()
             var board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
-                ManagedApplication(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
+                ManagedApplication.legacy(bundleIdentifier: "com.example.A", displayName: "A", desktopNumber: 1),
             ]))
             board.associateSelectedPreset(presetID)
 

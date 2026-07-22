@@ -116,7 +116,7 @@ let fullScreenLayout = Layout(
 )
 
 func app(_ bundleID: String, desktop: Int, layout: Layout?) -> ManagedApplication {
-    ManagedApplication(
+    ManagedApplication.legacy(
         bundleIdentifier: bundleID,
         displayName: bundleID,
         desktopNumber: desktop,

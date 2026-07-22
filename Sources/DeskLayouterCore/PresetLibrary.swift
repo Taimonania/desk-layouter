@@ -145,7 +145,7 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
     /// longer in the library is a harmless no-op.
     public mutating func update(id: Preset.ID, managedApplications: [ManagedApplication]) {
         guard let index = presets.firstIndex(where: { $0.id == id }) else { return }
-        presets[index].managedApplications = managedApplications
+        presets[index].managedApplications = managedApplications.uniquedByBundleIdentifier()
     }
 }
 

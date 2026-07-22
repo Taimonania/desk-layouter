@@ -21,7 +21,7 @@ struct AssignmentPlannerTestRunner {
         // Single-assignment method (walking-skeleton seam, #3): resolves a
         // Desktop number to the correct UUID.
         do {
-            let assignment = Assignment(
+            let assignment = Assignment.legacy(
                 bundleIdentifier: "com.example.Writer",
                 desktopNumber: 2
             )
@@ -39,7 +39,7 @@ struct AssignmentPlannerTestRunner {
         // Single-assignment method still throws for a missing Desktop so the
         // single-assignment UI can report the specific bad Desktop number.
         do {
-            let assignment = Assignment(
+            let assignment = Assignment.legacy(
                 bundleIdentifier: "com.example.Writer",
                 desktopNumber: 5
             )
@@ -61,7 +61,7 @@ struct AssignmentPlannerTestRunner {
                 orderedDesktopUUIDs: ["desktop-one", "desktop-two", "desktop-three"]
             )
             let bindings = planner.appBindings(
-                for: [Assignment(bundleIdentifier: "com.example.Writer", desktopNumber: 2)],
+                for: [Assignment.legacy(bundleIdentifier: "com.example.Writer", desktopNumber: 2)],
                 on: desktops
             )
             check(
@@ -79,9 +79,9 @@ struct AssignmentPlannerTestRunner {
             )
             let bindings = planner.appBindings(
                 for: [
-                    Assignment(bundleIdentifier: "com.example.Writer", desktopNumber: 1),
-                    Assignment(bundleIdentifier: "com.example.Gone", desktopNumber: 9),
-                    Assignment(bundleIdentifier: "com.example.Reader", desktopNumber: 2),
+                    Assignment.legacy(bundleIdentifier: "com.example.Writer", desktopNumber: 1),
+                    Assignment.legacy(bundleIdentifier: "com.example.Gone", desktopNumber: 9),
+                    Assignment.legacy(bundleIdentifier: "com.example.Reader", desktopNumber: 2),
                 ],
                 on: desktops
             )
@@ -100,7 +100,7 @@ struct AssignmentPlannerTestRunner {
         do {
             let desktops = DesktopSnapshot(orderedDesktopUUIDs: ["desktop-one"])
             let bindings = planner.appBindings(
-                for: [Assignment(bundleIdentifier: "com.example.Zero", desktopNumber: 0)],
+                for: [Assignment.legacy(bundleIdentifier: "com.example.Zero", desktopNumber: 0)],
                 on: desktops
             )
             check("collection skips a non-positive Desktop number", bindings.isEmpty, "got \(bindings)")
@@ -113,7 +113,7 @@ struct AssignmentPlannerTestRunner {
                 orderedDesktopUUIDs: ["desktop-one", "desktop-two"]
             )
             let bindings = planner.appBindings(
-                for: [Assignment(bundleIdentifier: "com.example.Writer", desktopNumber: 1)],
+                for: [Assignment.legacy(bundleIdentifier: "com.example.Writer", desktopNumber: 1)],
                 on: desktops
             )
             check(
@@ -136,7 +136,7 @@ struct AssignmentPlannerTestRunner {
         // with assignments present.
         do {
             let bindings = planner.appBindings(
-                for: [Assignment(bundleIdentifier: "com.example.Writer", desktopNumber: 1)],
+                for: [Assignment.legacy(bundleIdentifier: "com.example.Writer", desktopNumber: 1)],
                 on: DesktopSnapshot(orderedDesktopUUIDs: [])
             )
             check("collection with no Desktops is empty", bindings.isEmpty, "got \(bindings)")
@@ -150,9 +150,9 @@ struct AssignmentPlannerTestRunner {
             )
             let bindings = planner.appBindings(
                 for: [
-                    Assignment(bundleIdentifier: "com.example.Writer", desktopNumber: 1),
-                    Assignment(bundleIdentifier: "com.example.Reader", desktopNumber: 3),
-                    Assignment(bundleIdentifier: "com.example.Mail", desktopNumber: 2),
+                    Assignment.legacy(bundleIdentifier: "com.example.Writer", desktopNumber: 1),
+                    Assignment.legacy(bundleIdentifier: "com.example.Reader", desktopNumber: 3),
+                    Assignment.legacy(bundleIdentifier: "com.example.Mail", desktopNumber: 2),
                 ],
                 on: desktops
             )
@@ -173,7 +173,7 @@ struct AssignmentPlannerTestRunner {
         do {
             let desktops = DesktopSnapshot(orderedDesktopUUIDs: ["desktop-one"])
             let bindings = planner.appBindings(
-                for: [Assignment(bundleIdentifier: "com.Example.MixedCase", desktopNumber: 1)],
+                for: [Assignment.legacy(bundleIdentifier: "com.Example.MixedCase", desktopNumber: 1)],
                 on: desktops
             )
             check(

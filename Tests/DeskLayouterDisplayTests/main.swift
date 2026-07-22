@@ -35,15 +35,18 @@ final class StubDisplayInventory: DisplayInventoryProviding {
 final class StoreCommandRunner: CommandRunning {
     private(set) var calls: [(executable: String, arguments: [String])] = []
     var mainDesktopUUIDs: [String]
+    var otherDesktopUUIDs: [String: [String]]
     var includeCollapsedDuplicate: Bool
     private(set) var appBindings: [String: String]
 
     init(
         mainDesktopUUIDs: [String],
+        otherDesktopUUIDs: [String: [String]] = [:],
         includeCollapsedDuplicate: Bool = false,
         appBindings: [String: String] = [:]
     ) {
         self.mainDesktopUUIDs = mainDesktopUUIDs
+        self.otherDesktopUUIDs = otherDesktopUUIDs
         self.includeCollapsedDuplicate = includeCollapsedDuplicate
         self.appBindings = appBindings
     }
@@ -76,6 +79,12 @@ final class StoreCommandRunner: CommandRunning {
             "Display Identifier": "Main",
             "Spaces": spaces,
         ])
+        for (displayIdentifier, desktopUUIDs) in otherDesktopUUIDs {
+            monitors.append([
+                "Display Identifier": displayIdentifier,
+                "Spaces": desktopUUIDs.map { ["uuid": $0] },
+            ])
+        }
         return [
             "app-bindings": appBindings,
             "SpacesDisplayConfiguration": [
@@ -120,7 +129,18 @@ final class StubSessionUpdater: SessionBindingUpdating {
 }
 
 func display(id: UInt32, main: Bool = false, mirrors: UInt32 = 0) -> ActiveDisplay {
-    ActiveDisplay(displayID: id, isMain: main, mirrorsDisplayID: mirrors)
+    ActiveDisplay(
+        displayID: id,
+        isMain: main,
+        mirrorsDisplayID: mirrors,
+        identity: DisplayIdentity(
+            colorSyncUUID: "00000000-0000-0000-0000-\(String(format: "%012d", id))",
+            lastKnownName: "Display \(id)",
+            vendorID: 100,
+            modelID: id,
+            serialNumber: id * 10
+        )
+    )
 }
 
 @main
@@ -236,6 +256,64 @@ struct DisplayTestRunner {
             )
         }
 
+        // A migration choice can resolve either physical Display while ordinary
+        // editing still rejects the extended topology. Main is derived at runtime;
+        // the non-main physical Display resolves through its ColorSync UUID.
+        do {
+            let main = display(id: 1, main: true)
+            let external = display(id: 3)
+            let externalUUID = external.identity!.colorSyncUUID
+            let inventory = StubDisplayInventory(displays: [main, external])
+            let runner = StoreCommandRunner(
+                mainDesktopUUIDs: ["M1", "M2"],
+                otherDesktopUUIDs: [externalUUID: ["E1", "E2", "E3"]]
+            )
+            let adapter = MacOSSpacesAdapter(
+                commandRunner: runner,
+                sessionBindingUpdater: StubSessionUpdater(),
+                displayInventory: inventory
+            )
+            let choices = try? adapter.availableDisplays()
+            let mainSnapshot = try? adapter.desktopSnapshot(for: main.identity!)
+            let externalSnapshot = try? adapter.desktopSnapshot(for: external.identity!)
+            check(
+                "multi-Display migration exposes every physical Display as a choice",
+                choices == [main.identity!, external.identity!]
+            )
+            check(
+                "the currently Main physical Display resolves only through the runtime Main alias",
+                mainSnapshot == DesktopSnapshot(display: main.identity!, orderedDesktopUUIDs: ["M1", "M2"])
+            )
+            check(
+                "a non-main physical Display resolves through its ColorSync UUID",
+                externalSnapshot == DesktopSnapshot(display: external.identity!, orderedDesktopUUIDs: ["E1", "E2", "E3"])
+            )
+        }
+
+        do {
+            let inventory = StubDisplayInventory(displays: [display(id: 3, main: true)])
+            let runner = StoreCommandRunner(
+                mainDesktopUUIDs: ["D1", "D2"],
+                appBindings: ["com.example.writer": "LAST-WRITTEN-D2"]
+            )
+            let adapter = MacOSSpacesAdapter(
+                commandRunner: runner,
+                sessionBindingUpdater: StubSessionUpdater(),
+                displayInventory: inventory
+            )
+            let persisted = try? adapter.persistedDesktopUUIDs(
+                for: ["Com.Example.Writer", "com.example.missing"]
+            )
+            check(
+                "migration reads the actual last-written concrete UUID without changing key identity",
+                persisted == ["Com.Example.Writer": "LAST-WRITTEN-D2"]
+            )
+            check(
+                "reading legacy applied state performs no mutation",
+                runner.writeCalls.isEmpty && runner.deleteCalls.isEmpty && runner.killallCalls.isEmpty
+            )
+        }
+
         expectError("snapshot with multiple Displays fails without mutation", .multipleDisplaysUnsupported) {
             let inventory = StubDisplayInventory(displays: [
                 display(id: 1, main: true),
@@ -266,7 +344,10 @@ struct DisplayTestRunner {
             )
             // The board was planned against a two-Desktop order; the live store
             // now reports three — a topology change between planning and Apply.
-            let staleSnapshot = DesktopSnapshot(orderedDesktopUUIDs: ["D1", "D2"])
+            let staleSnapshot = DesktopSnapshot(
+                display: display(id: 3, main: true).identity,
+                orderedDesktopUUIDs: ["D1", "D2"]
+            )
 
             var thrown: Error?
             do {
@@ -306,7 +387,10 @@ struct DisplayTestRunner {
                 sessionBindingUpdater: updater,
                 displayInventory: inventory
             )
-            let snapshot = DesktopSnapshot(orderedDesktopUUIDs: ["D1", "D2", "D3"])
+            let snapshot = DesktopSnapshot(
+                display: display(id: 3, main: true).identity,
+                orderedDesktopUUIDs: ["D1", "D2", "D3"]
+            )
 
             var thrown: Error?
             do {
@@ -340,7 +424,10 @@ struct DisplayTestRunner {
                 sessionBindingUpdater: updater,
                 displayInventory: inventory
             )
-            let snapshot = DesktopSnapshot(orderedDesktopUUIDs: ["D1", "D2", "D3"])
+            let snapshot = DesktopSnapshot(
+                display: display(id: 3, main: true).identity,
+                orderedDesktopUUIDs: ["D1", "D2", "D3"]
+            )
 
             var thrown: Error?
             do {

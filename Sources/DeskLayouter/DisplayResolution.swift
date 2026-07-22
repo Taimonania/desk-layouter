@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Darwin
 import DeskLayouterCore
@@ -12,15 +13,22 @@ import Foundation
 public struct ActiveDisplay: Equatable, Sendable {
     public let displayID: UInt32
     public let isMain: Bool
+    public let identity: DisplayIdentity?
     /// The master display this one mirrors, or `0` when it is not a mirror
     /// secondary. Mirror secondaries collapse into their master's logical
     /// Display, so a mirrored group counts as one Display rather than several.
     public let mirrorsDisplayID: UInt32
 
-    public init(displayID: UInt32, isMain: Bool, mirrorsDisplayID: UInt32) {
+    public init(
+        displayID: UInt32,
+        isMain: Bool,
+        mirrorsDisplayID: UInt32,
+        identity: DisplayIdentity? = nil
+    ) {
         self.displayID = displayID
         self.isMain = isMain
         self.mirrorsDisplayID = mirrorsDisplayID
+        self.identity = identity
     }
 }
 
@@ -87,6 +95,36 @@ public struct SkyLightActiveSpaceProvider: ActiveSpaceProviding {
 /// unit-tested directly: which logical Display is active, and which ordered
 /// Desktops that Display currently hosts.
 public enum DisplayResolution {
+    /// Active physical destinations, with mirror secondaries collapsed into the
+    /// primary Display macOS exposes as the independent Desktop host.
+    public static func logicalDisplays(from displays: [ActiveDisplay]) -> [ActiveDisplay] {
+        displays.filter { $0.mirrorsDisplayID == 0 }
+    }
+
+    /// The runtime-only private monitor alias for an active physical Display.
+    /// `Main` is derived from the current role and never enters persistence.
+    public static func displayKey(for display: ActiveDisplay) throws -> String {
+        if display.isMain { return "Main" }
+        guard let identity = display.identity else {
+            throw SpacesAdapterError.displayEnumerationFailed
+        }
+        return identity.colorSyncUUID
+    }
+
+    /// Resolves one persisted identity to one currently active logical Display.
+    public static func activeDisplay(
+        matching identity: DisplayIdentity,
+        in displays: [ActiveDisplay]
+    ) throws -> ActiveDisplay {
+        let matches = logicalDisplays(from: displays).filter {
+            $0.identity?.identifiesSameDisplay(as: identity) == true
+        }
+        guard matches.count == 1, let match = matches.first else {
+            throw SpacesAdapterError.noActiveDisplay
+        }
+        return match
+    }
+
     /// Collapses mirror sets to logical Displays and returns the private Spaces
     /// store key for the sole active logical Display.
     ///
@@ -103,7 +141,7 @@ public enum DisplayResolution {
     public static func activeDisplayKey(for displays: [ActiveDisplay]) throws -> String {
         // A mirror secondary reports the master it mirrors; drop it so a
         // mirrored group resolves to one logical Display rather than many.
-        let logicalDisplays = displays.filter { $0.mirrorsDisplayID == 0 }
+        let logicalDisplays = logicalDisplays(from: displays)
         guard let soleDisplay = logicalDisplays.first else {
             throw SpacesAdapterError.noActiveDisplay
         }
@@ -241,8 +279,27 @@ struct CoreGraphicsDisplayInventory: DisplayInventoryProviding {
             ActiveDisplay(
                 displayID: identifier,
                 isMain: identifier == mainDisplay,
-                mirrorsDisplayID: CGDisplayMirrorsDisplay(identifier)
+                mirrorsDisplayID: CGDisplayMirrorsDisplay(identifier),
+                identity: displayIdentity(for: identifier)
             )
         }
+    }
+
+    private func displayIdentity(for displayID: CGDirectDisplayID) -> DisplayIdentity? {
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else {
+            return nil
+        }
+        let uuidString = CFUUIDCreateString(nil, uuid) as String
+        let displayName = NSScreen.screens.first { display in
+            (display.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+                .uint32Value == displayID
+        }?.localizedName ?? "Display"
+        return DisplayIdentity(
+            colorSyncUUID: uuidString,
+            lastKnownName: displayName,
+            vendorID: CGDisplayVendorNumber(displayID),
+            modelID: CGDisplayModelNumber(displayID),
+            serialNumber: CGDisplaySerialNumber(displayID)
+        )
     }
 }

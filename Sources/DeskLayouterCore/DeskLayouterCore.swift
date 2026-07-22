@@ -1,18 +1,59 @@
 public struct Assignment: Equatable, Sendable {
     public let bundleIdentifier: String
+    /// `nil` is accepted only for tolerant legacy decoding before migration.
+    public let display: DisplayIdentity?
     public let desktopNumber: Int
 
-    public init(bundleIdentifier: String, desktopNumber: Int) {
+    public init(
+        bundleIdentifier: String,
+        display: DisplayIdentity,
+        desktopNumber: Int
+    ) {
         self.bundleIdentifier = bundleIdentifier
+        self.display = display
+        self.desktopNumber = desktopNumber
+    }
+
+    public static func legacy(
+        bundleIdentifier: String,
+        desktopNumber: Int
+    ) -> Assignment {
+        Assignment(
+            bundleIdentifier: bundleIdentifier,
+            legacyDisplay: nil,
+            desktopNumber: desktopNumber
+        )
+    }
+
+    private init(
+        bundleIdentifier: String,
+        legacyDisplay: DisplayIdentity?,
+        desktopNumber: Int
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        display = legacyDisplay
         self.desktopNumber = desktopNumber
     }
 }
 
 public struct DesktopSnapshot: Equatable, Sendable {
+    /// The physical Display whose ordered Desktops were resolved. `nil` supports
+    /// older test and adapter callers; production snapshots always carry it.
+    public let display: DisplayIdentity?
     public let orderedDesktopUUIDs: [String]
 
-    public init(orderedDesktopUUIDs: [String]) {
+    public init(
+        display: DisplayIdentity? = nil,
+        orderedDesktopUUIDs: [String]
+    ) {
+        self.display = display
         self.orderedDesktopUUIDs = orderedDesktopUUIDs
+    }
+
+    public func concreteDesktopUUID(at desktopNumber: Int) -> String? {
+        let index = desktopNumber - 1
+        guard orderedDesktopUUIDs.indices.contains(index) else { return nil }
+        return orderedDesktopUUIDs[index]
     }
 }
 
@@ -80,6 +121,11 @@ public struct AssignmentPlanner: Sendable {
         for assignment: Assignment,
         on desktops: DesktopSnapshot
     ) -> String? {
+        if let assignmentDisplay = assignment.display,
+           let snapshotDisplay = desktops.display,
+           !assignmentDisplay.identifiesSameDisplay(as: snapshotDisplay) {
+            return nil
+        }
         let desktopIndex = assignment.desktopNumber - 1
         guard desktops.orderedDesktopUUIDs.indices.contains(desktopIndex) else {
             return nil
