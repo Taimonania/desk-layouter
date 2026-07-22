@@ -11,6 +11,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let editorModel = EditorModel()
 
+    // App-level preferences that live outside the board/preset domain model —
+    // currently just the automatic-update-install choice (issue #71), persisted in
+    // UserDefaults and applied to Sparkle at launch.
+    private let appState = AppStateStore()
+
+    // Owns the window's full-window screen state (board vs. Settings) and exposes
+    // the app-level preferences the Settings screen edits.
+    private lazy var rootModel = AppRootModel(appState: appState)
+
     // Sparkle's standard controller owns the whole update flow (scheduling, UI,
     // signature checks). It reads SUFeedURL/SUPublicEDKey from Info.plist and
     // starts checking on its own once created; `checkForUpdates:` is the manual
@@ -45,6 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // also declares LSUIElement in Info.plist, so the app stays a menu-bar
         // (accessory) presence with no Dock icon even though it opens a window.
         NSApplication.shared.setActivationPolicy(.accessory)
+
+        // Automatic update *checking* stays always-on; whether an available update
+        // *installs* on its own follows the user's persisted choice (issue #71),
+        // which defaults to Ask. Syncing here — at launch — is why the choice takes
+        // effect on the next restart.
+        updaterController.updater.automaticallyChecksForUpdates = true
+        updaterController.updater.automaticallyDownloadsUpdates = appState.automaticallyInstallUpdates
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
@@ -150,8 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // next menu-bar click without spawning a duplicate (issue #40).
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(
-            rootView: EditorView(
-                model: editorModel,
+            // The root wrapper swaps the window between the board and the
+            // full-window Settings screen in place (issue #71); the board itself
+            // owns none of that navigation state.
+            rootView: AppRootView(
+                model: rootModel,
+                editorModel: editorModel,
                 quit: { [weak self] in self?.presenter.quit() },
                 // Route the editor's version control through the same standard
                 // updater the menu bar uses (issue #70); passing `nil` as sender
