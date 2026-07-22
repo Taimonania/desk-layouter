@@ -28,5 +28,13 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Sparkle auto-update configuration (issue #45). -->
+	<key>SUFeedURL</key>
+	<string>https://taimonania.github.io/desk-layouter/appcast.xml</string>
+	<!-- EdDSA public key from Sparkle's `generate_keys`; the matching private key
+	     is held out of band and signs every appcast enclosure. Rotating it would
+	     invalidate installed clients' ability to verify updates. -->
+	<key>SUPublicEDKey</key>
+	<string>t7NzmIZFFAL1NxRDdMjyGtuORIoNj6FTLVUr8wbSBAM=</string>
 </dict>
 </plist>

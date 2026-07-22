@@ -35,4 +35,58 @@ cp "$binary_directory/DeskLayouter" "$contents_directory/MacOS/DeskLayouter"
 cp "$project_directory/App/Info.plist" "$contents_directory/Info.plist"
 plutil -lint "$contents_directory/Info.plist"
 
+# Embed Sparkle.framework. The executable links it as @rpath/Sparkle.framework,
+# but SwiftPM only leaves it in the build directory, so a relocatable .app must
+# carry its own copy under Contents/Frameworks and gain an rpath that points
+# there. This is required for the app to launch at all (signed or not), so it is
+# unconditional and does not depend on a signing identity. `cp -R` preserves the
+# framework's version symlinks; `install_name_tool` adds the load path.
+frameworks_directory="$contents_directory/Frameworks"
+sparkle_source="$binary_directory/Sparkle.framework"
+if [ -d "$sparkle_source" ]; then
+	mkdir -p "$frameworks_directory"
+	cp -R "$sparkle_source" "$frameworks_directory/"
+	install_name_tool -add_rpath "@executable_path/../Frameworks" \
+		"$contents_directory/MacOS/DeskLayouter"
+else
+	echo "build-app: Sparkle.framework not found at $sparkle_source" >&2
+	exit 1
+fi
+
+# Re-sign Sparkle's nested helpers inside-out with the Developer ID identity and
+# a hardened runtime, then the framework, then the app. This runs ONLY when a
+# signing identity is provided via DEVELOPER_ID_APPLICATION (the release/sign
+# path in Scripts/release.sh, which resolves and exports it). The default
+# `make build` local-iteration flow leaves this unset and ships an un-signed app,
+# even on a machine that happens to hold a Developer ID certificate. We sign each
+# nested item explicitly (never --deep) so every code object gets its own
+# hardened-runtime signature, which notarization requires. --timestamp matches
+# release.sh's do_sign convention.
+signing_identity="${DEVELOPER_ID_APPLICATION:-}"
+if [ -n "$signing_identity" ]; then
+	echo "build-app: re-signing Sparkle helpers inside-out with '$signing_identity'..."
+	sparkle_versioned="$frameworks_directory/Sparkle.framework/Versions/B"
+
+	sign() {
+		codesign --force --options runtime --timestamp --sign "$signing_identity" "$1"
+	}
+
+	# 1) Innermost XPC services.
+	for xpc in "$sparkle_versioned/XPCServices"/*.xpc; do
+		[ -e "$xpc" ] && sign "$xpc"
+	done
+	# 2) The command-line Autoupdate helper and the Updater.app helper bundle.
+	sign "$sparkle_versioned/Autoupdate"
+	sign "$sparkle_versioned/Updater.app"
+	# 3) The framework itself (sign the concrete version, not the symlinks).
+	sign "$sparkle_versioned"
+	# 4) The main executable, then 5) the outer app bundle.
+	sign "$contents_directory/MacOS/DeskLayouter"
+	sign "$app_bundle"
+
+	codesign --verify --strict --verbose=2 "$app_bundle" \
+		|| { echo "build-app: signature verification failed" >&2; exit 1; }
+	echo "build-app: signed and verified OK"
+fi
+
 printf '%s\n' "$app_bundle"

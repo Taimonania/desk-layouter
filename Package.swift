@@ -10,6 +10,10 @@ let package = Package(
     products: [
         .executable(name: "DeskLayouter", targets: ["DeskLayouter"]),
     ],
+    dependencies: [
+        // Sparkle 2 drives in-app auto-updates (see App/Info.plist SUFeedURL/SUPublicEDKey).
+        .package(url: "https://github.com/sparkle-project/Sparkle", .upToNextMajor(from: "2.6.0")),
+    ],
     targets: [
         .target(name: "DeskLayouterCore"),
         .target(
@@ -33,7 +37,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "DeskLayouter",
-            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            dependencies: [
+                "DeskLayouterCore",
+                "DeskLayouterMacOS",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/DeskLayouter",
             exclude: [
                 "SpacesAdapter.swift",
