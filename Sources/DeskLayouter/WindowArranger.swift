@@ -82,6 +82,20 @@ public struct ArrangeReport: Equatable, Sendable {
     public var hasResistance: Bool { !resisted.isEmpty }
 }
 
+/// One Arrange pass may cover multiple saved physical identities while those
+/// Displays are mirrored. Reporting stays attached to each Assignment's saved
+/// physical destination even though Accessibility uses the mirror primary's
+/// shared screen geometry for the actual move.
+public struct PhysicalDisplayArrangeReport: Equatable, Sendable {
+    public let display: DisplayIdentity
+    public let report: ArrangeReport
+
+    public init(display: DisplayIdentity, report: ArrangeReport) {
+        self.display = display
+        self.report = report
+    }
+}
+
 public enum WindowArrangeError: Error, Equatable {
     /// The Accessibility permission is not granted. Arrange prompts for it and
     /// moves nothing (acceptance criteria).
@@ -109,6 +123,60 @@ public enum ArrangeEngine {
         assignedToDesktop desktopNumber: Int
     ) -> [ManagedApplication] {
         applications.filter { $0.desktopNumber == desktopNumber }
+    }
+
+    /// Multi-Display scoping: match both the logical mirror/extended section and
+    /// positional Desktop number before any Accessibility operation occurs.
+    public static func applications(
+        _ applications: [ManagedApplication],
+        assignedTo destination: DesktopAddress,
+        in topology: DisplayTopologySnapshot
+    ) -> [ManagedApplication] {
+        guard let destinationSection = topology.section(containing: destination.display) else {
+            return []
+        }
+        return applications.filter { application in
+            guard let display = application.display else { return false }
+            return destinationSection.contains(display)
+                && application.desktopNumber == destination.desktopNumber
+        }
+    }
+
+    /// Partitions a logical Display pass back into its saved physical Assignment
+    /// destinations. Extended Displays naturally produce one partition; a mirror
+    /// group can produce one per member without misreporting an app under the
+    /// group's primary identity.
+    public static func reportsByAssignedDisplay(
+        _ report: ArrangeReport,
+        applications: [ManagedApplication]
+    ) -> [PhysicalDisplayArrangeReport] {
+        var displays: [DisplayIdentity] = []
+        var displayByBundleIdentifier: [String: DisplayIdentity] = [:]
+        for application in applications {
+            guard let display = application.display else { continue }
+            displayByBundleIdentifier[application.bundleIdentifier.lowercased()] = display
+            if !displays.contains(where: { $0.identifiesSameDisplay(as: display) }) {
+                displays.append(display)
+            }
+        }
+
+        func belongs(_ bundleIdentifier: String, to display: DisplayIdentity) -> Bool {
+            displayByBundleIdentifier[bundleIdentifier.lowercased()]?
+                .identifiesSameDisplay(as: display) == true
+        }
+
+        return displays.compactMap { display in
+            let partition = ArrangeReport(
+                arranged: report.arranged.filter { belongs($0, to: display) },
+                skipped: report.skipped.filter { belongs($0, to: display) },
+                resisted: report.resisted.filter { belongs($0.bundleIdentifier, to: display) }
+            )
+            guard !partition.arranged.isEmpty
+                    || !partition.skipped.isEmpty
+                    || !partition.resisted.isEmpty
+            else { return nil }
+            return PhysicalDisplayArrangeReport(display: display, report: partition)
+        }
     }
 
     /// The managed apps eligible to be arranged: those carrying a non-nil Layout
@@ -200,6 +268,12 @@ public protocol ScreenGeometryProviding {
     var activeVisibleFrame: CGRect? { get }
     /// The primary display's height — the anchor for the top-left y-flip.
     var primaryDisplayHeight: CGFloat { get }
+    /// The usable frame for a specific physical Display.
+    func visibleFrame(for display: DisplayIdentity) -> CGRect?
+}
+
+public extension ScreenGeometryProviding {
+    func visibleFrame(for display: DisplayIdentity) -> CGRect? { activeVisibleFrame }
 }
 
 // MARK: - Orchestrator
@@ -229,6 +303,26 @@ public final class WindowArranger {
     /// when the permission is missing, so nothing is moved; throws
     /// ``WindowArrangeError/noActiveScreen`` when no screen resolves.
     public func arrange(managedApplications: [ManagedApplication]) throws -> ArrangeReport {
+        try arrange(managedApplications: managedApplications, visibleFrame: screenGeometry.activeVisibleFrame)
+    }
+
+    /// Arranges one Display/Desktop pass against that physical Display's usable
+    /// area. The caller scopes `managedApplications` to the matching Assignment
+    /// destination, so another Display's app is never moved or reported here.
+    public func arrange(
+        managedApplications: [ManagedApplication],
+        on display: DisplayIdentity
+    ) throws -> ArrangeReport {
+        try arrange(
+            managedApplications: managedApplications,
+            visibleFrame: screenGeometry.visibleFrame(for: display)
+        )
+    }
+
+    private func arrange(
+        managedApplications: [ManagedApplication],
+        visibleFrame: CGRect?
+    ) throws -> ArrangeReport {
         guard authorizer.ensureTrusted(promptIfNeeded: true) else {
             throw WindowArrangeError.accessibilityNotGranted
         }
@@ -236,7 +330,7 @@ public final class WindowArranger {
         // required for a meaningful flip. Treat a missing frame or a zero height
         // as "no active screen" and fail closed rather than flipping against a
         // bogus height and silently placing windows off-screen.
-        guard let visibleFrame = screenGeometry.activeVisibleFrame else {
+        guard let visibleFrame else {
             throw WindowArrangeError.noActiveScreen
         }
         let primaryHeight = screenGeometry.primaryDisplayHeight
@@ -428,5 +522,18 @@ public struct MainScreenGeometryProvider: ScreenGeometryProviding {
         // where no screen sits at the origin.
         let primary = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
         return primary?.frame.height ?? 0
+    }
+
+    public func visibleFrame(for display: DisplayIdentity) -> CGRect? {
+        NSScreen.screens.first { screen in
+            guard
+                let number = screen.deviceDescription[
+                    NSDeviceDescriptionKey("NSScreenNumber")
+                ] as? NSNumber,
+                let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue()
+            else { return false }
+            let value = CFUUIDCreateString(nil, uuid) as String
+            return value.caseInsensitiveCompare(display.colorSyncUUID) == .orderedSame
+        }?.visibleFrame
     }
 }

@@ -1,3 +1,5 @@
+import DeskLayouterCore
+
 // The arming state machine for runtime Arrange (issue #27, ADR-0003).
 //
 // Pressing Arrange arranges the active Desktop immediately and then "arms" every
@@ -75,5 +77,36 @@ public struct DesktopArrangePlan: Equatable, Sendable {
         guard let desktop, armedDesktops.contains(desktop) else { return .ignore }
         armedDesktops.remove(desktop)
         return .arrange(tearDownAfter: armedDesktops.isEmpty)
+    }
+}
+
+/// Multi-Display Arrange arming. The destination key includes physical Display
+/// identity and Desktop number, so Desktop 2 on two Displays is armed twice and
+/// each is completed only by visiting that exact destination.
+public struct MultiDisplayArrangePlan: Equatable, Sendable {
+    public private(set) var armedDestinations: Set<DesktopAddress> = []
+
+    public init() {}
+
+    public var isObserving: Bool { !armedDestinations.isEmpty }
+
+    @discardableResult
+    public mutating func press(
+        destinationsWithLayouts: Set<DesktopAddress>,
+        visibleDestinations: Set<DesktopAddress>
+    ) -> Bool {
+        armedDestinations = destinationsWithLayouts.subtracting(visibleDestinations)
+        return isObserving
+    }
+
+    /// Completes only destinations that were armed. Returns those completed by
+    /// this visit so callers never arrange/report another Assignment destination.
+    @discardableResult
+    public mutating func completeVisible(
+        _ destinations: Set<DesktopAddress>
+    ) -> Set<DesktopAddress> {
+        let completed = armedDestinations.intersection(destinations)
+        armedDestinations.subtract(completed)
+        return completed
     }
 }

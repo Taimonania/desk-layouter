@@ -102,6 +102,7 @@ public extension BoardState {
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
                 desktopNumber: application.desktopNumber,
+                display: application.display,
                 layout: application.layout,
                 isApplicationAvailable: installedBundleIdentifiers.contains(application.bundleIdentifier)
             )
@@ -128,5 +129,83 @@ public extension BoardState {
             availableColumns: availableColumns,
             unavailableDesktops: unavailableDesktops
         )
+    }
+}
+
+/// One stacked, collapsible Display section in the multi-Display board.
+public struct DisplayBoardSection: Equatable, Sendable, Identifiable {
+    public let display: DisplayIdentity
+    public let memberDisplays: [DisplayIdentity]
+    public let displayName: String
+    public let isMain: Bool
+    public let availableColumns: [DesktopColumn]
+    public let unavailableDesktops: [UnavailableDesktopSection]
+
+    public var id: String { display.colorSyncUUID.lowercased() }
+    public var isMirrored: Bool { memberDisplays.count > 1 }
+}
+
+public struct DisplayBoardProjection: Equatable, Sendable {
+    public let sections: [DisplayBoardSection]
+
+    public init(sections: [DisplayBoardSection]) {
+        self.sections = sections
+    }
+
+    public var hasUnavailableDesktopAssignments: Bool {
+        sections.contains { !$0.unavailableDesktops.isEmpty }
+    }
+}
+
+public extension BoardState {
+    /// Projects every active logical Display independently. Mirror-member
+    /// identities resolve into the same logical section; identical Desktop
+    /// numbers on different Displays never share cards.
+    func projection(
+        on topology: DisplayTopologySnapshot,
+        installedBundleIdentifiers: Set<String>
+    ) -> DisplayBoardProjection {
+        let sections = topology.sections.map { snapshot -> DisplayBoardSection in
+            func card(_ application: ManagedApplication) -> BoardCard {
+                BoardCard(
+                    bundleIdentifier: application.bundleIdentifier,
+                    displayName: application.displayName,
+                    desktopNumber: application.desktopNumber,
+                    display: application.display,
+                    layout: application.layout,
+                    isApplicationAvailable: installedBundleIdentifiers.contains(application.bundleIdentifier)
+                )
+            }
+
+            let applications = configuration.managedApplications.filter { application in
+                guard let display = application.display else { return false }
+                return snapshot.contains(display)
+            }
+            let validRange = 1...max(snapshot.orderedDesktopUUIDs.count, 1)
+            var available: [Int: [BoardCard]] = [:]
+            var unavailable: [Int: [BoardCard]] = [:]
+            for application in applications {
+                if !snapshot.orderedDesktopUUIDs.isEmpty, validRange.contains(application.desktopNumber) {
+                    available[application.desktopNumber, default: []].append(card(application))
+                } else {
+                    unavailable[application.desktopNumber, default: []].append(card(application))
+                }
+            }
+            let columns = snapshot.orderedDesktopUUIDs.indices.map { index in
+                DesktopColumn(number: index + 1, cards: available[index + 1] ?? [])
+            }
+            let unavailableSections = unavailable.keys.sorted().map { number in
+                UnavailableDesktopSection(desktopNumber: number, cards: unavailable[number] ?? [])
+            }
+            return DisplayBoardSection(
+                display: snapshot.primaryDisplay,
+                memberDisplays: snapshot.memberDisplays,
+                displayName: topology.displayName(for: snapshot),
+                isMain: snapshot.isMain,
+                availableColumns: columns,
+                unavailableDesktops: unavailableSections
+            )
+        }
+        return DisplayBoardProjection(sections: sections)
     }
 }

@@ -1,3 +1,5 @@
+import DeskLayouterCore
+
 /// Feedback produced by the latest editor action (Apply, Arrange, Preset edits,
 /// and related board operations).
 public enum EditorFeedback: Equatable, Sendable {
@@ -16,6 +18,29 @@ public enum EditorFeedback: Equatable, Sendable {
     public var isFailure: Bool {
         if case .failure = self { return true }
         return false
+    }
+}
+
+/// User-facing consequences of Mission Control settings. Keeping the priority
+/// here makes the disabling requirement testable independently of SwiftUI: the
+/// separate-Spaces blocker always outranks the non-blocking positional warning.
+public enum DisplaySettingsPresentation {
+    public static func actionsAllowed(for topology: DisplayTopologySnapshot) -> Bool {
+        topology.displaysHaveSeparateSpaces
+    }
+
+    public static func feedback(for topology: DisplayTopologySnapshot) -> EditorFeedback {
+        if !topology.displaysHaveSeparateSpaces {
+            return .info(
+                "Displays have separate Spaces is off. Your board is preserved, and Apply and Arrange are disabled until you turn it on."
+            )
+        }
+        if topology.automaticallyRearrangesSpaces {
+            return .info(
+                "Automatic Space rearrangement is enabled. Desktop numbers are positional and may change, but Apply and Arrange remain available."
+            )
+        }
+        return .none
     }
 }
 

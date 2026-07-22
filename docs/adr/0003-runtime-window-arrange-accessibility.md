@@ -1,6 +1,6 @@
 # Runtime window Arrange via the Accessibility API, one-shot per Desktop
 
-Status: Accepted (design; not yet implemented)
+Status: Accepted (implemented; extended to multiple physical Displays in #22)
 
 ## Context
 
@@ -23,11 +23,28 @@ Triggering Arrange (the "Arrange" button):
 2. **Arms** every other Desktop that has Layouts defined. The first time such a Desktop becomes active (`NSWorkspace.activeSpaceDidChangeNotification`), it is arranged **once**, then disarmed.
 3. Once every armed Desktop has been visited and arranged, the app **stops observing entirely**. It is not a permanent background observer. Pressing Arrange again re-arms.
 
+With multiple extended Displays, the unit of arming is the pair **physical
+Display + positional Desktop number**, never the Desktop number alone. Arrange
+immediately handles the currently visible Desktop on every connected Display,
+using that Display's `NSScreen.visibleFrame`; it then arms each remaining pair
+that contains a valid Layout. Live per-Display Space state comes from the
+dynamically resolved SkyLight managed-display-spaces snapshot and fails closed
+when unavailable. Reports always name both the physical Display and Desktop.
+
 Overlaps and gaps between apps' Layouts are allowed and unvalidated; apps with no Layout are never touched.
 
 ### Considered options
 
-- **Private SkyLight / `CGSSpaces` APIs.** Rejected. Their only added capability over Accessibility is moving windows across *different* Spaces — which Arrange never does. They are undocumented and unstable, are only honored fully from `Dock.app` (requiring code injection into a system process), and that injection requires partially disabling SIP (weakening system security machine-wide, silently re-enabled by Apple repairs). They are both the costly path and an unnecessary one. See [macOS app stack research §2a, §2e](../research/macos-app-stack.md).
+- **Private SkyLight / `CGSSpaces` window-movement APIs.** Rejected. Their
+  added capability over Accessibility is moving windows across *different*
+  Spaces — which Arrange never does. They are only honored fully from
+  `Dock.app` (requiring code injection into a system process), and that
+  injection requires partially disabling SIP (weakening system security
+  machine-wide, silently re-enabled by Apple repairs). Issue #22 does use one
+  narrower, read-only private call, `SLSCopyManagedDisplaySpaces`, to identify
+  the visible Space on each Display; it is dynamically resolved and fails
+  closed when unavailable. It never moves a window or injects into Dock. See
+  [macOS app stack research §2a, §2e](../research/macos-app-stack.md).
 - **Forced walk of all Desktops on one press** — synthesize the "switch Space" keystrokes, wait for each animation, arrange, repeat. Rejected as the app's most breakage-prone surface: there is no public "go to Desktop N" call, so it relies on synthesized keystrokes and animation-timing waits; the "automatically rearrange Spaces based on most recent use" setting can scramble order; and multi-display makes the shortcut ambiguous. It is also visually jarring (the screen flips through every Space).
 
 The one-shot-per-Desktop observer delivers the same outcome — every Desktop ends up arranged — as a natural consequence of the user moving between Desktops, without the fragile keystroke walk and without a permanent background agent.

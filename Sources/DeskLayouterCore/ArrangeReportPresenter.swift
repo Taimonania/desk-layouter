@@ -104,6 +104,28 @@ public enum ArrangeReportPresenter {
         )
     }
 
+    /// Display-addressed variant used by multi-Display Arrange. Every result is
+    /// explicitly attributed to both the physical Display and Desktop.
+    public static func announce(
+        displayName: String,
+        desktopNumber: Int,
+        arranged: [String],
+        skipped: [String],
+        resisted: [String]
+    ) -> Announcement {
+        let base = announce(
+            activeDesktop: desktopNumber,
+            arranged: arranged,
+            skipped: skipped,
+            resisted: resisted,
+            pendingDesktops: []
+        )
+        return Announcement(
+            message: "\(displayName), Desktop \(desktopNumber): \(base.message)",
+            tone: base.tone
+        )
+    }
+
     private static func desktopPhrase(_ number: Int?) -> String {
         if let number { return "Desktop \(number)" }
         return "the active Desktop"

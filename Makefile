@@ -1,4 +1,5 @@
 .PHONY: build run relaunch test test-desktop-placement benchmark-picker \
+	multi-display-arm multi-display-verify multi-display-restore \
 	session-boundary-arm session-boundary-verify session-boundary-restore \
 	update-arm update-verify update-restore \
 	release release-preflight release-notes release-appcast verify-release
@@ -29,6 +30,7 @@ test:
 	swift run DeskLayouterReconcilerTests
 	swift run DeskLayouterAdapterFailureTests
 	swift run DeskLayouterDisplayTests
+	swift run DeskLayouterMultiDisplayTests
 	swift run DeskLayouterMigrationTests
 	swift run DeskLayouterArrangeTests
 	swift run DeskLayouterArrangePlanTests
@@ -46,6 +48,18 @@ test:
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh
+
+# Human-gated transactional issue #22 harness. `arm` verifies placement and
+# Layout on both built-in + external Displays under the current Main role. Change
+# Main in System Settings, then run `verify`; `restore` is safe standalone.
+multi-display-arm:
+	./Scripts/verify-multi-display.sh arm
+
+multi-display-verify:
+	./Scripts/verify-multi-display.sh verify
+
+multi-display-restore:
+	./Scripts/verify-multi-display.sh restore
 
 # Repeatable input-to-results diagnostic for issue #89. It measures in-memory
 # filtering, row presentation, and icon lookup separately over a 240-app catalog.

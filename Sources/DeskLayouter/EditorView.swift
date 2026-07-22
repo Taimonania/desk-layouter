@@ -25,7 +25,8 @@ struct EditorView: View {
     /// board itself owns none of it.
     let openHelp: () -> Void
 
-    @State private var dropTargetDesktop: Int?
+    @State private var dropTarget: DesktopAddress?
+    @State private var collapsedDisplayIDs: Set<String> = []
     @State private var searchFieldWidth: CGFloat = 0
     @State private var footerActionButtonWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
@@ -480,35 +481,83 @@ struct EditorView: View {
 
     @ViewBuilder
     private func board(availableWidth: CGFloat) -> some View {
-        if model.columns.isEmpty, model.unavailableDesktops.isEmpty {
-            Text("No Desktops were found on the active display.")
+        if model.displaySections.isEmpty {
+            Text("No active Displays and Desktops were found.")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 160)
         } else {
             VStack(alignment: .leading, spacing: 18) {
-                LazyVGrid(
-                    columns: gridColumns(availableWidth: availableWidth),
-                    alignment: .leading,
-                    spacing: 14
-                ) {
-                    ForEach(model.columns) { column in
-                        desktopColumn(column)
-                    }
-                }
-                .padding(.vertical, 2)
-
-                // Assignments stranded on Desktops that no longer exist stay
-                // visible and recoverable here rather than being dropped (issue
-                // #52). Each card can be moved to a Desktop that exists.
-                if !model.unavailableDesktops.isEmpty {
-                    unavailableDesktopsRegion(availableWidth: availableWidth)
+                ForEach(model.displaySections) { section in
+                    displaySection(section, availableWidth: availableWidth)
                 }
             }
         }
     }
 
+    private func displaySection(
+        _ section: DisplayBoardSection,
+        availableWidth: CGFloat
+    ) -> some View {
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { !collapsedDisplayIDs.contains(section.id) },
+                set: { expanded in
+                    if expanded { collapsedDisplayIDs.remove(section.id) }
+                    else { collapsedDisplayIDs.insert(section.id) }
+                }
+            )
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(
+                    columns: gridColumns(
+                        availableWidth: availableWidth,
+                        itemCount: section.availableColumns.count
+                    ),
+                    alignment: .leading,
+                    spacing: 14
+                ) {
+                    ForEach(section.availableColumns) { column in
+                        desktopColumn(column, display: section.display)
+                    }
+                }
+                .padding(.vertical, 2)
+
+                if !section.unavailableDesktops.isEmpty {
+                    unavailableDesktopsRegion(
+                        section.unavailableDesktops,
+                        availableWidth: availableWidth
+                    )
+                }
+            }
+            .padding(.top, 10)
+        } label: {
+            HStack(spacing: 8) {
+                Text(section.displayName).font(.headline)
+                if section.isMain {
+                    Text("Main")
+                        .font(.caption)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                }
+                if section.isMirrored {
+                    Image(systemName: "rectangle.on.rectangle")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.035)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.secondary.opacity(0.16)))
+        .accessibilityLabel("Display \(section.displayName)\(section.isMain ? ", Main" : "")")
+    }
+
     @ViewBuilder
-    private func unavailableDesktopsRegion(availableWidth: CGFloat) -> some View {
+    private func unavailableDesktopsRegion(
+        _ unavailableDesktops: [UnavailableDesktopSection],
+        availableWidth: CGFloat
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -522,11 +571,14 @@ struct EditorView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             LazyVGrid(
-                columns: gridColumns(availableWidth: availableWidth),
+                columns: gridColumns(
+                    availableWidth: availableWidth,
+                    itemCount: unavailableDesktops.count
+                ),
                 alignment: .leading,
                 spacing: 14
             ) {
-                ForEach(model.unavailableDesktops) { section in
+                ForEach(unavailableDesktops) { section in
                     unavailableDesktopSection(section)
                 }
             }
@@ -569,20 +621,21 @@ struct EditorView: View {
     /// evenly instead of leaving a gap that reads as a reserved fourth slot. When
     /// the window is too narrow to fit every Desktop at a comfortable width, the
     /// extra Desktops wrap onto additional rows.
-    private func gridColumns(availableWidth: CGFloat) -> [GridItem] {
+    private func gridColumns(availableWidth: CGFloat, itemCount: Int) -> [GridItem] {
         let minColumnWidth: CGFloat = 210
         let spacing: CGFloat = 14
         let usableWidth = max(availableWidth, minColumnWidth)
         let columnsThatFit = max(1, Int((usableWidth + spacing) / (minColumnWidth + spacing)))
-        let columnCount = min(columnsThatFit, max(model.columns.count, 1))
+        let columnCount = min(columnsThatFit, max(itemCount, 1))
         return Array(
             repeating: GridItem(.flexible(minimum: minColumnWidth), spacing: spacing),
             count: columnCount
         )
     }
 
-    private func desktopColumn(_ column: DesktopColumn) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func desktopColumn(_ column: DesktopColumn, display: DisplayIdentity) -> some View {
+        let address = DesktopAddress(display: display, desktopNumber: column.number)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Desktop \(column.number)")
                     .font(.headline)
@@ -612,23 +665,23 @@ struct EditorView: View {
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(dropTargetDesktop == column.number ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.06))
+                .fill(dropTarget == address ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.06))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(
-                    dropTargetDesktop == column.number ? Color.accentColor : Color.clear,
+                    dropTarget == address ? Color.accentColor : Color.clear,
                     lineWidth: 2
                 )
         )
         .onDrop(
             of: [.plainText],
             isTargeted: Binding(
-                get: { dropTargetDesktop == column.number },
-                set: { targeted in dropTargetDesktop = targeted ? column.number : nil }
+                get: { dropTarget == address },
+                set: { targeted in dropTarget = targeted ? address : nil }
             )
         ) { providers in
-            handleDrop(providers, onto: column.number)
+            handleDrop(providers, onto: address)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Desktop \(column.number), \(column.assignmentCount) Assignments")
@@ -697,7 +750,8 @@ struct EditorView: View {
 
     private func cardAccessibilityLabel(_ card: BoardCard) -> String {
         let availability = card.isApplicationAvailable ? "" : ", not installed"
-        return "\(card.presentedName), Desktop \(card.desktopNumber)\(availability), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable"
+        let display = card.display?.lastKnownName ?? "unknown Display"
+        return "\(card.presentedName), \(display), Desktop \(card.desktopNumber)\(availability), \(card.hasLayout ? "has a Layout" : "no Layout"). Draggable"
     }
 
     /// The Layout affordance on a card: a live mini-grid preview when the app has a
@@ -723,8 +777,8 @@ struct EditorView: View {
     /// from a card always seeds from the current stored Layout rather than a stale
     /// capture.
     private func currentCard(for card: BoardCard) -> BoardCard? {
-        let available = model.columns.flatMap(\.cards)
-        let unavailable = model.unavailableDesktops.flatMap(\.cards)
+        let available = model.displaySections.flatMap(\.availableColumns).flatMap(\.cards)
+        let unavailable = model.displaySections.flatMap(\.unavailableDesktops).flatMap(\.cards)
         return (available + unavailable)
             .first { $0.bundleIdentifier == card.bundleIdentifier }
     }
@@ -735,10 +789,16 @@ struct EditorView: View {
     /// is skipped since moving there is a no-op.
     @ViewBuilder
     private func moveButtons(for card: BoardCard) -> some View {
-        ForEach(desktopNumbers, id: \.self) { number in
-            if number != card.desktopNumber {
-                Button("Move to Desktop \(number)") {
-                    model.move(bundleIdentifier: card.bundleIdentifier, toDesktop: number)
+        ForEach(model.assignmentDestinations, id: \.self) { destination in
+            let isCurrent = card.display?.identifiesSameDisplay(as: destination.display) == true
+                && card.desktopNumber == destination.desktopNumber
+            if !isCurrent {
+                Button("Move to \(destination.display.lastKnownName), Desktop \(destination.desktopNumber)") {
+                    model.move(
+                        bundleIdentifier: card.bundleIdentifier,
+                        toDisplay: destination.display,
+                        desktopNumber: destination.desktopNumber
+                    )
                 }
             }
         }
@@ -767,14 +827,18 @@ struct EditorView: View {
         iconView(forBundleIdentifier: card.bundleIdentifier)
     }
 
-    private func handleDrop(_ providers: [NSItemProvider], onto desktopNumber: Int) -> Bool {
+    private func handleDrop(_ providers: [NSItemProvider], onto destination: DesktopAddress) -> Bool {
         guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
             return false
         }
         _ = provider.loadObject(ofClass: NSString.self) { object, _ in
             guard let bundleIdentifier = object as? String else { return }
             Task { @MainActor in
-                model.move(bundleIdentifier: bundleIdentifier, toDesktop: desktopNumber)
+                model.move(
+                    bundleIdentifier: bundleIdentifier,
+                    toDisplay: destination.display,
+                    desktopNumber: destination.desktopNumber
+                )
             }
         }
         return true
@@ -790,6 +854,7 @@ struct EditorView: View {
                 .welcomeAnchor(.searchField)
             Text("Add to")
                 .foregroundStyle(.secondary)
+            displayPicker
             destinationPicker
                 .welcomeAnchor(.destinationPicker)
         }
@@ -892,7 +957,9 @@ struct EditorView: View {
                 hoveredBundleIdentifier = nil
             }
         }
-        .accessibilityLabel("Add \(application.presentedName) to Desktop \(model.newAssignmentDesktopNumber)")
+        .accessibilityLabel(
+            "Add \(application.presentedName) to \(model.selectedAssignmentDisplay?.lastKnownName ?? "the selected Display"), Desktop \(model.newAssignmentDesktopNumber)"
+        )
     }
 
     @ViewBuilder
@@ -920,6 +987,24 @@ struct EditorView: View {
         .frame(width: 130)
         .disabled(!model.canEditAssignments)
         .accessibilityLabel("Destination Desktop for the new application")
+    }
+
+    private var displayPicker: some View {
+        Picker(
+            "Destination Display",
+            selection: Binding(
+                get: { model.newAssignmentDisplayUUID },
+                set: { model.selectNewAssignmentDisplay(uuid: $0) }
+            )
+        ) {
+            ForEach(model.displaySections) { section in
+                Text(section.displayName).tag(section.display.colorSyncUUID)
+            }
+        }
+        .labelsHidden()
+        .frame(minWidth: 150)
+        .disabled(!model.canEditAssignments)
+        .accessibilityLabel("Destination physical Display for the new application")
     }
 
     // MARK: - Status + footer actions

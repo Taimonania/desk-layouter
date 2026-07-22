@@ -10,6 +10,7 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
     public let bundleIdentifier: String
     public let displayName: String
     public let desktopNumber: Int
+    public let display: DisplayIdentity?
 
     /// Where this app's window sits on its Desktop, or `nil` when it has no
     /// Layout. The board uses this both to distinguish apps that have a Layout
@@ -30,12 +31,14 @@ public struct BoardCard: Equatable, Sendable, Identifiable {
         bundleIdentifier: String,
         displayName: String,
         desktopNumber: Int,
+        display: DisplayIdentity? = nil,
         layout: Layout? = nil,
         isApplicationAvailable: Bool = true
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
         self.desktopNumber = desktopNumber
+        self.display = display
         self.layout = layout
         self.isApplicationAvailable = isApplicationAvailable
     }
@@ -210,6 +213,7 @@ public struct BoardState: Codable, Equatable, Sendable {
                     bundleIdentifier: application.bundleIdentifier,
                     displayName: application.displayName,
                     desktopNumber: application.desktopNumber,
+                    display: application.display,
                     layout: application.layout
                 )
             )
@@ -226,7 +230,7 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// the working set but not the baseline), the moves (assigned to a different
     /// Desktop), and the removals (present in the baseline but no longer managed).
     public var pendingChanges: [String] {
-        pendingChanges(on: nil)
+        pendingChanges(on: Optional<DesktopSnapshot>.none)
     }
 
     /// Pending Assignments against an optional live snapshot. Semantic changes
@@ -251,6 +255,35 @@ public struct BoardState: Codable, Equatable, Sendable {
                display.identifiesSameDisplay(as: snapshotDisplay),
                snapshot.concreteDesktopUUID(at: destination.desktopNumber)
                     != applied.concreteDesktopUUID {
+                changed.insert(bundleIdentifier)
+            }
+        }
+        for bundleIdentifier in appliedAssignments.keys where working[bundleIdentifier] == nil {
+            changed.insert(bundleIdentifier)
+        }
+        return changed.sorted()
+    }
+
+    /// Multi-Display pending state. A topology role/geometry change is not a
+    /// semantic edit, but a changed concrete Desktop UUID is still Apply-pending.
+    public func pendingChanges(on topology: DisplayTopologySnapshot?) -> [String] {
+        let working = BoardState.baseline(from: configuration)
+        var changed: Set<String> = []
+        for (bundleIdentifier, destination) in working {
+            guard let applied = appliedAssignments[bundleIdentifier] else {
+                changed.insert(bundleIdentifier)
+                continue
+            }
+            guard BoardState.sameSemanticDestination(destination, applied) else {
+                changed.insert(bundleIdentifier)
+                continue
+            }
+            if let topology,
+               let display = destination.display,
+               topology.concreteDesktopUUID(
+                    display: display,
+                    desktopNumber: destination.desktopNumber
+               ) != applied.concreteDesktopUUID {
                 changed.insert(bundleIdentifier)
             }
         }
@@ -307,6 +340,31 @@ public struct BoardState: Codable, Equatable, Sendable {
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
                 legacyDisplay: application.display,
+                desktopNumber: desktopNumber,
+                layout: application.layout
+            )
+        )
+    }
+
+    /// Moves an Assignment to an explicit physical Display and Desktop while
+    /// preserving its Layout and presentation metadata.
+    public mutating func move(
+        bundleIdentifier: String,
+        toDisplay display: DisplayIdentity,
+        desktopNumber: Int
+    ) {
+        guard let application = configuration.managedApplication(for: bundleIdentifier) else {
+            return
+        }
+        if application.display?.identifiesSameDisplay(as: display) == true,
+           application.desktopNumber == desktopNumber {
+            return
+        }
+        configuration.upsert(
+            ManagedApplication(
+                bundleIdentifier: application.bundleIdentifier,
+                displayName: application.displayName,
+                display: display,
                 desktopNumber: desktopNumber,
                 layout: application.layout
             )
@@ -383,6 +441,24 @@ public struct BoardState: Codable, Equatable, Sendable {
             from: configuration,
             effectiveDesktopUUIDs: effectiveDesktopUUIDs
         )
+    }
+
+    /// Advances only the destinations actually updated by a partial,
+    /// topology-aware Apply. Preserved unresolved Assignments keep their prior
+    /// concrete baseline; explicit removals disappear after successful deletion.
+    public mutating func markApplied(_ plan: AssignmentApplyPlan) {
+        configuration.clearPendingRemovals()
+        for deleted in plan.deletions {
+            appliedAssignments.removeValue(forKey: deleted)
+        }
+        for application in configuration.managedApplications {
+            guard let concrete = plan.updates[application.bundleIdentifier] else { continue }
+            appliedAssignments[application.bundleIdentifier] = AppliedAssignment(
+                display: application.display,
+                desktopNumber: application.desktopNumber,
+                concreteDesktopUUID: concrete
+            )
+        }
     }
 
     private static func baseline(
