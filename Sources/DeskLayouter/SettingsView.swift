@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The full-window Settings screen (issue #71). It replaces the board in the same
+/// The full-window Settings surface (issue #71). It replaces the board in the same
 /// window rather than opening a sheet or a separate window, reusing the in-window
-/// screen-swap navigation. Today it hosts a single control — whether updates
+/// surface-swap navigation. Today it hosts a single control — whether updates
 /// install automatically or ask first — and a "Done" control that returns to the
 /// board.
 struct SettingsView: View {
@@ -47,6 +47,6 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(minWidth: 760, minHeight: 640)
+        .frame(minWidth: AppWindowMetrics.minWidth, minHeight: AppWindowMetrics.minHeight)
     }
 }

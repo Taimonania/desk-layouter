@@ -1,8 +1,16 @@
 import SwiftUI
 
+/// The minimum size shared by every full-window surface hosted in the editor
+/// window (the board and the Settings surface), kept in one place so the two
+/// cannot drift apart.
+enum AppWindowMetrics {
+    static let minWidth: CGFloat = 760
+    static let minHeight: CGFloat = 640
+}
+
 /// The window's content root. It swaps between the board (`EditorView`) and the
 /// full-window `SettingsView` based on the navigation state, so a full-window
-/// screen replaces the board in place rather than opening a sheet or a second
+/// surface replaces the board in place rather than opening a sheet or a second
 /// window (issue #71). `AppDelegate` hosts this view in the editor window.
 struct AppRootView: View {
     @ObservedObject var model: AppRootModel
@@ -16,7 +24,7 @@ struct AppRootView: View {
     let checkForUpdates: () -> Void
 
     var body: some View {
-        switch model.navigation.screen {
+        switch model.navigation.surface {
         case .board:
             EditorView(
                 model: editorModel,

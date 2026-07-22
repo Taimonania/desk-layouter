@@ -73,8 +73,8 @@ struct AppStateTestRunner {
             let navigation = AppNavigation()
             check(
                 "navigation starts on the board",
-                navigation.screen == .board,
-                "got \(navigation.screen)"
+                navigation.surface == .board,
+                "got \(navigation.surface)"
             )
         }
 
@@ -82,24 +82,24 @@ struct AppStateTestRunner {
             var navigation = AppNavigation()
             navigation.showSettings()
             check(
-                "showSettings swaps to the Settings screen",
-                navigation.screen == .settings,
-                "got \(navigation.screen)"
+                "showSettings swaps to the Settings surface",
+                navigation.surface == .settings,
+                "got \(navigation.surface)"
             )
             navigation.showBoard()
             check(
                 "showBoard (Done) returns to the board",
-                navigation.screen == .board,
-                "got \(navigation.screen)"
+                navigation.surface == .board,
+                "got \(navigation.surface)"
             )
         }
 
         do {
-            var navigation = AppNavigation(screen: .settings)
+            var navigation = AppNavigation(surface: .settings)
             navigation.showSettings()
             check(
                 "showSettings is idempotent when already on Settings",
-                navigation.screen == .settings
+                navigation.surface == .settings
             )
         }
 

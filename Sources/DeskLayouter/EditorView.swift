@@ -73,7 +73,7 @@ struct EditorView: View {
             .padding(Self.boardPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 760, minHeight: 640)
+        .frame(minWidth: AppWindowMetrics.minWidth, minHeight: AppWindowMetrics.minHeight)
         .sheet(item: $editingLayoutCard) { card in
             LayoutEditorView(model: model, card: currentCard(for: card) ?? card)
         }
