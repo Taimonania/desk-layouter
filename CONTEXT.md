@@ -5,19 +5,27 @@ A personal macOS utility that decides which Desktop each application opens on. T
 ## Language
 
 **Display**:
-A physical display on which macOS hosts an ordered set of Desktops.
+A physical display on which macOS hosts an ordered set of Desktops. An Assignment identifies the physical Display independently of temporary roles such as Main.
 _Avoid_: Screen, Monitor.
 
 **Desktop**:
-A macOS Space, shown to the user positionally as "Desktop 1, 2, 3…". The unit an application is assigned to.
+A macOS Space belonging to a Display, shown to the user positionally within that Display as "Desktop 1, 2, 3…". The unit an application is assigned to.
 _Avoid_: Space (the internal/API term), Screen, Monitor.
 
 **Assignment**:
-A persistent rule that a given application should open on a specific Desktop. Once written, macOS itself enforces it at launch and at login — the app does not move windows at runtime.
+A persistent rule that a given application should open on a specific numbered Desktop of a specific physical Display. Once written, macOS itself enforces it at launch and at login — the app does not move windows at runtime.
 _Avoid_: Binding (the internal `com.apple.spaces` plist term), mapping, rule.
 
+**Unavailable Display**:
+A physical Display referenced by an Assignment that cannot currently be resolved as an independent destination, because it is disconnected or cannot be identified uniquely. Its Assignments remain part of the board.
+_Avoid_: Missing screen, removed Display.
+
+**Unavailable Desktop**:
+A numbered Desktop referenced by an Assignment that does not exist on its currently available Display. Distinct from an Unavailable Display: the Display is known and connected, but the positional destination is invalid.
+_Avoid_: Unavailable Display, missing Space.
+
 **Preset**:
-A named, persistent snapshot of the complete editable board, including every managed application's Assignment and optional Layout. Loading creates a working copy without enacting it; later edits change the Preset only when the user explicitly updates it, while Apply and Arrange remain separate actions.
+A named, persistent snapshot of the complete editable board, including every managed application's physical-Display Assignment and optional Layout. Loading creates a working copy without enacting it; later edits change the Preset only when the user explicitly updates it, while Apply and Arrange remain separate actions.
 _Avoid_: Profile, template, configuration.
 
 **Apply**:
