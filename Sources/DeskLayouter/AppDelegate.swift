@@ -150,7 +150,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // next menu-bar click without spawning a duplicate (issue #40).
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(
-            rootView: EditorView(model: editorModel, quit: { [weak self] in self?.presenter.quit() })
+            rootView: EditorView(
+                model: editorModel,
+                quit: { [weak self] in self?.presenter.quit() },
+                // Route the editor's version control through the same standard
+                // updater the menu bar uses (issue #70); passing `nil` as sender
+                // is the manual "Check for Updates" entry point.
+                checkForUpdates: { [weak self] in self?.updaterController.checkForUpdates(nil) }
+            )
         )
         window.setContentSize(NSSize(width: 720, height: 480))
         return window
