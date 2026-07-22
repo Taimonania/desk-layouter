@@ -1,5 +1,6 @@
 .PHONY: build run relaunch test test-desktop-placement \
 	session-boundary-arm session-boundary-verify session-boundary-restore \
+	update-arm update-verify update-restore \
 	release release-preflight release-appcast verify-release
 
 build:
@@ -48,6 +49,21 @@ session-boundary-verify:
 
 session-boundary-restore:
 	./Scripts/verify-session-boundary.sh restore
+
+# Human-gated, run-once mechanism-validation harness (issue #47): proves a
+# stable Developer ID identity keeps the Accessibility (TCC) grant alive across
+# a Sparkle auto-update. NOT part of `make test`/CI — re-run only when the
+# signing/Sparkle/OS-TCC mechanism changes. Run `update-arm`, then (as a human)
+# grant Accessibility to the installed test app and let Sparkle install N+1, then
+# `update-verify`. `update-restore` is transactional and idempotent.
+update-arm:
+	./Scripts/verify-update.sh arm
+
+update-verify:
+	./Scripts/verify-update.sh verify
+
+update-restore:
+	./Scripts/verify-update.sh restore
 
 # Release pipeline (issues #44, #46). `release-preflight` checks tools +
 # credentials and publishes nothing. `release` builds → signs → notarizes →
