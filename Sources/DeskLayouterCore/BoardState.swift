@@ -379,7 +379,17 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// actually written the new bindings.
     public mutating func markApplied(effectiveDesktopUUIDs: [String: String] = [:]) {
         configuration.clearPendingRemovals()
-        appliedAssignments = Dictionary(
+        appliedAssignments = BoardState.baseline(
+            from: configuration,
+            effectiveDesktopUUIDs: effectiveDesktopUUIDs
+        )
+    }
+
+    private static func baseline(
+        from configuration: DeskLayouterConfiguration,
+        effectiveDesktopUUIDs: [String: String] = [:]
+    ) -> [String: AppliedAssignment] {
+        Dictionary(
             configuration.managedApplications.map { application in
                 (
                     application.bundleIdentifier,
@@ -387,24 +397,6 @@ public struct BoardState: Codable, Equatable, Sendable {
                         display: application.display,
                         desktopNumber: application.desktopNumber,
                         concreteDesktopUUID: effectiveDesktopUUIDs[application.bundleIdentifier]
-                    )
-                )
-            },
-            uniquingKeysWith: { _, latest in latest }
-        )
-    }
-
-    private static func baseline(
-        from configuration: DeskLayouterConfiguration
-    ) -> [String: AppliedAssignment] {
-        Dictionary(
-            configuration.managedApplications.map {
-                (
-                    $0.bundleIdentifier,
-                    AppliedAssignment(
-                        display: $0.display,
-                        desktopNumber: $0.desktopNumber,
-                        concreteDesktopUUID: nil
                     )
                 )
             },

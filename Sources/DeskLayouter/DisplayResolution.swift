@@ -290,13 +290,13 @@ struct CoreGraphicsDisplayInventory: DisplayInventoryProviding {
             return nil
         }
         let uuidString = CFUUIDCreateString(nil, uuid) as String
-        let screenName = NSScreen.screens.first { screen in
-            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+        let displayName = NSScreen.screens.first { display in
+            (display.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
                 .uint32Value == displayID
         }?.localizedName ?? "Display"
         return DisplayIdentity(
             colorSyncUUID: uuidString,
-            lastKnownName: screenName,
+            lastKnownName: displayName,
             vendorID: CGDisplayVendorNumber(displayID),
             modelID: CGDisplayModelNumber(displayID),
             serialNumber: CGDisplaySerialNumber(displayID)
