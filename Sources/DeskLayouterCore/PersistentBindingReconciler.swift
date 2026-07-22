@@ -13,6 +13,18 @@
 /// its own; it is deliberately pure dictionary arithmetic so it can be
 /// exhaustively unit-tested with fabricated dictionaries.
 public enum PersistentBindingReconciler {
+    /// Multi-Display reconciliation: preserve every existing key except an
+    /// explicit deletion, then overlay every resolvable update.
+    public static func completeBindings(
+        existing: [String: String],
+        updates: [String: String],
+        deletions: Set<String>
+    ) -> [String: String] {
+        var result = existing.filter { key, _ in !deletions.contains(key) }
+        for (key, value) in updates { result[key] = value }
+        return result
+    }
+
     /// - Parameters:
     ///   - existing: the full current `app-bindings` dictionary read back from
     ///     the store (bundle-ID key → Desktop UUID).

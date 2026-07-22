@@ -64,6 +64,35 @@ public enum AssignmentPlanningError: Error, Equatable {
 public struct AssignmentPlanner: Sendable {
     public init() {}
 
+    /// Plans a complete multi-Display Apply. Only an explicitly removed managed
+    /// app is deleted; a disconnected Display or out-of-range Desktop is a
+    /// preservation, never an implicit deletion.
+    public func applyPlan(
+        configuration: DeskLayouterConfiguration,
+        on topology: DisplayTopologySnapshot
+    ) -> AssignmentApplyPlan {
+        var updates: [String: String] = [:]
+        var preservations: Set<String> = []
+        for application in configuration.managedApplications {
+            guard
+                let display = application.display,
+                let uuid = topology.concreteDesktopUUID(
+                    display: display,
+                    desktopNumber: application.desktopNumber
+                )
+            else {
+                preservations.insert(application.bundleIdentifier)
+                continue
+            }
+            updates[application.bundleIdentifier] = uuid
+        }
+        return AssignmentApplyPlan(
+            updates: updates,
+            deletions: Set(configuration.pendingRemovals),
+            preservations: preservations
+        )
+    }
+
     /// Resolves a collection of managed Assignments against a Desktop snapshot
     /// into the logical managed bindings (`bundleID → Desktop UUID`).
     ///

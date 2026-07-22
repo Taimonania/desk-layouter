@@ -111,6 +111,23 @@ public enum ArrangeEngine {
         applications.filter { $0.desktopNumber == desktopNumber }
     }
 
+    /// Multi-Display scoping: match both the logical mirror/extended section and
+    /// positional Desktop number before any Accessibility operation occurs.
+    public static func applications(
+        _ applications: [ManagedApplication],
+        assignedTo destination: DesktopAddress,
+        in topology: DisplayTopologySnapshot
+    ) -> [ManagedApplication] {
+        guard let destinationSection = topology.section(containing: destination.display) else {
+            return []
+        }
+        return applications.filter { application in
+            guard let display = application.display else { return false }
+            return destinationSection.contains(display)
+                && application.desktopNumber == destination.desktopNumber
+        }
+    }
+
     /// The managed apps eligible to be arranged: those carrying a non-nil Layout
     /// that also validates. `Layout.targetFrame(in:)` does not validate, so an
     /// invalid Layout is filtered out here rather than producing a garbage rect.
@@ -200,6 +217,12 @@ public protocol ScreenGeometryProviding {
     var activeVisibleFrame: CGRect? { get }
     /// The primary display's height — the anchor for the top-left y-flip.
     var primaryDisplayHeight: CGFloat { get }
+    /// The usable frame for a specific physical Display.
+    func visibleFrame(for display: DisplayIdentity) -> CGRect?
+}
+
+public extension ScreenGeometryProviding {
+    func visibleFrame(for display: DisplayIdentity) -> CGRect? { activeVisibleFrame }
 }
 
 // MARK: - Orchestrator
@@ -229,6 +252,26 @@ public final class WindowArranger {
     /// when the permission is missing, so nothing is moved; throws
     /// ``WindowArrangeError/noActiveScreen`` when no screen resolves.
     public func arrange(managedApplications: [ManagedApplication]) throws -> ArrangeReport {
+        try arrange(managedApplications: managedApplications, visibleFrame: screenGeometry.activeVisibleFrame)
+    }
+
+    /// Arranges one Display/Desktop pass against that physical Display's usable
+    /// area. The caller scopes `managedApplications` to the matching Assignment
+    /// destination, so another Display's app is never moved or reported here.
+    public func arrange(
+        managedApplications: [ManagedApplication],
+        on display: DisplayIdentity
+    ) throws -> ArrangeReport {
+        try arrange(
+            managedApplications: managedApplications,
+            visibleFrame: screenGeometry.visibleFrame(for: display)
+        )
+    }
+
+    private func arrange(
+        managedApplications: [ManagedApplication],
+        visibleFrame: CGRect?
+    ) throws -> ArrangeReport {
         guard authorizer.ensureTrusted(promptIfNeeded: true) else {
             throw WindowArrangeError.accessibilityNotGranted
         }
@@ -236,7 +279,7 @@ public final class WindowArranger {
         // required for a meaningful flip. Treat a missing frame or a zero height
         // as "no active screen" and fail closed rather than flipping against a
         // bogus height and silently placing windows off-screen.
-        guard let visibleFrame = screenGeometry.activeVisibleFrame else {
+        guard let visibleFrame else {
             throw WindowArrangeError.noActiveScreen
         }
         let primaryHeight = screenGeometry.primaryDisplayHeight
@@ -428,5 +471,18 @@ public struct MainScreenGeometryProvider: ScreenGeometryProviding {
         // where no screen sits at the origin.
         let primary = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
         return primary?.frame.height ?? 0
+    }
+
+    public func visibleFrame(for display: DisplayIdentity) -> CGRect? {
+        NSScreen.screens.first { screen in
+            guard
+                let number = screen.deviceDescription[
+                    NSDeviceDescriptionKey("NSScreenNumber")
+                ] as? NSNumber,
+                let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue()
+            else { return false }
+            let value = CFUUIDCreateString(nil, uuid) as String
+            return value.caseInsensitiveCompare(display.colorSyncUUID) == .orderedSame
+        }?.visibleFrame
     }
 }

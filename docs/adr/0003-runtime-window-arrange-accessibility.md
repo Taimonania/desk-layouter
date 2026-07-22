@@ -1,6 +1,6 @@
 # Runtime window Arrange via the Accessibility API, one-shot per Desktop
 
-Status: Accepted (design; not yet implemented)
+Status: Accepted (implemented; extended to multiple physical Displays in #22)
 
 ## Context
 
@@ -22,6 +22,14 @@ Triggering Arrange (the "Arrange" button):
 1. Immediately arranges the **currently active Desktop**: for each managed app on it that has a Layout, take the frontmost standard window (`kAXStandardWindowSubrole`, skipping minimized) and set its frame within `NSScreen.visibleFrame`, then read the frame back and report any window that resisted (fixed-size/fullscreen/sheet).
 2. **Arms** every other Desktop that has Layouts defined. The first time such a Desktop becomes active (`NSWorkspace.activeSpaceDidChangeNotification`), it is arranged **once**, then disarmed.
 3. Once every armed Desktop has been visited and arranged, the app **stops observing entirely**. It is not a permanent background observer. Pressing Arrange again re-arms.
+
+With multiple extended Displays, the unit of arming is the pair **physical
+Display + positional Desktop number**, never the Desktop number alone. Arrange
+immediately handles the currently visible Desktop on every connected Display,
+using that Display's `NSScreen.visibleFrame`; it then arms each remaining pair
+that contains a valid Layout. Live per-Display Space state comes from the
+dynamically resolved SkyLight managed-display-spaces snapshot and fails closed
+when unavailable. Reports always name both the physical Display and Desktop.
 
 Overlaps and gaps between apps' Layouts are allowed and unvalidated; apps with no Layout are never touched.
 

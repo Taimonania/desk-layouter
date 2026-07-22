@@ -5,6 +5,10 @@ import Foundation
 public protocol SpacesAdapter {
     func currentDesktopSnapshot() throws -> DesktopSnapshot
 
+    /// Complete active multi-Display topology, including live Main/mirror roles,
+    /// ordered Desktops, and Mission Control settings.
+    func currentDisplayTopology() throws -> DisplayTopologySnapshot
+
     /// Physical Displays currently available as independent destinations.
     func availableDisplays() throws -> [DisplayIdentity]
 
@@ -25,6 +29,11 @@ public protocol SpacesAdapter {
     /// be identified — runtime Arrange (#27) uses this to know which Desktop it is
     /// enacting so it can arm the others, and treats `nil` as "unknown".
     func activeDesktopNumber() throws -> Int?
+
+    /// The Desktop currently visible on every connected logical Display.
+    func activeDesktopDestinations(
+        in topology: DisplayTopologySnapshot
+    ) throws -> Set<DesktopAddress>
 
     /// Applies the managed Assignments to both macOS representations.
     ///
@@ -48,9 +57,32 @@ public protocol SpacesAdapter {
         managedBundleIdentifiers: Set<String>,
         expectedSnapshot: DesktopSnapshot?
     ) throws
+
+    /// Applies a topology-aware mutation plan and revalidates the complete
+    /// topology immediately before the first persistent mutation.
+    func apply(
+        plan: AssignmentApplyPlan,
+        expectedTopology: DisplayTopologySnapshot
+    ) throws
 }
 
 public extension SpacesAdapter {
+    func currentDisplayTopology() throws -> DisplayTopologySnapshot {
+        let snapshot = try currentDesktopSnapshot()
+        guard let display = snapshot.display else { throw SpacesAdapterError.noActiveDisplay }
+        return DisplayTopologySnapshot(
+            displaysHaveSeparateSpaces: true,
+            automaticallyRearrangesSpaces: false,
+            sections: [DisplayDesktopSectionSnapshot(
+                primaryDisplay: display,
+                memberDisplays: [display],
+                isMain: true,
+                bounds: DisplayBounds(x: 0, y: 0, width: 0, height: 0),
+                orderedDesktopUUIDs: snapshot.orderedDesktopUUIDs
+            )]
+        )
+    }
+
     /// Compatibility defaults keep focused test doubles small. Production uses
     /// `MacOSSpacesAdapter`'s topology-aware implementations.
     func availableDisplays() throws -> [DisplayIdentity] {
@@ -70,6 +102,23 @@ public extension SpacesAdapter {
         for bundleIdentifiers: Set<String>
     ) throws -> [String: String] {
         [:]
+    }
+
+    func activeDesktopDestinations(
+        in topology: DisplayTopologySnapshot
+    ) throws -> Set<DesktopAddress> {
+        guard let section = topology.sections.first,
+              let number = try activeDesktopNumber()
+        else { return [] }
+        return [DesktopAddress(display: section.primaryDisplay, desktopNumber: number)]
+    }
+
+    func apply(plan: AssignmentApplyPlan, expectedTopology: DisplayTopologySnapshot) throws {
+        try apply(
+            managedBindings: plan.updates,
+            managedBundleIdentifiers: Set(plan.updates.keys).union(plan.deletions),
+            expectedSnapshot: nil
+        )
     }
 }
 
@@ -97,17 +146,33 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
     private let sessionBindingUpdater: SessionBindingUpdating
     private let displayInventory: DisplayInventoryProviding
     private let activeSpaceProvider: ActiveSpaceProviding
+    private let activeDisplaySpacesProvider: ActiveDisplaySpacesProviding
+    private let displaySettings: DisplaySettingsProviding
 
     public init(
         commandRunner: CommandRunning? = nil,
         sessionBindingUpdater: SessionBindingUpdating? = nil,
         displayInventory: DisplayInventoryProviding? = nil,
-        activeSpaceProvider: ActiveSpaceProviding? = nil
+        activeSpaceProvider: ActiveSpaceProviding? = nil,
+        activeDisplaySpacesProvider: ActiveDisplaySpacesProviding? = nil,
+        displaySettings: DisplaySettingsProviding? = nil
     ) {
         self.commandRunner = commandRunner ?? CommandRunner()
         self.sessionBindingUpdater = sessionBindingUpdater ?? SessionBindingUpdater()
         self.displayInventory = displayInventory ?? CoreGraphicsDisplayInventory()
         self.activeSpaceProvider = activeSpaceProvider ?? SkyLightActiveSpaceProvider()
+        self.activeDisplaySpacesProvider = activeDisplaySpacesProvider
+            ?? SkyLightActiveDisplaySpacesProvider()
+        self.displaySettings = displaySettings ?? SystemDisplaySettingsProvider()
+    }
+
+    public func currentDisplayTopology() throws -> DisplayTopologySnapshot {
+        try DisplayResolution.topology(
+            from: displayInventory.activeDisplays(),
+            store: readStore(),
+            displaysHaveSeparateSpaces: displaySettings.displaysHaveSeparateSpaces,
+            automaticallyRearrangesSpaces: displaySettings.automaticallyRearrangesSpaces
+        )
     }
 
     public func currentDesktopSnapshot() throws -> DesktopSnapshot {
@@ -180,6 +245,34 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             fromStore: store,
             displayKey: displayKey
         )
+    }
+
+    public func activeDesktopDestinations(
+        in topology: DisplayTopologySnapshot
+    ) throws -> Set<DesktopAddress> {
+        let activeIDs = try activeDisplaySpacesProvider.activeManagedSpaceIDsByDisplayKey()
+        let store = try readStore()
+        var destinations: Set<DesktopAddress> = []
+        for section in topology.sections {
+            let key = section.isMain ? "Main" : section.primaryDisplay.colorSyncUUID
+            let managedID = activeIDs[key]
+                ?? (section.isMain ? activeIDs[section.primaryDisplay.colorSyncUUID] : nil)
+            guard
+                let managedID,
+                let number = DisplayResolution.desktopNumber(
+                    forManagedSpaceID: managedID,
+                    fromStore: store,
+                    displayKey: key
+                )
+            else { throw SpacesAdapterError.activeDesktopUnavailable }
+            destinations.insert(
+                DesktopAddress(display: section.primaryDisplay, desktopNumber: number)
+            )
+        }
+        guard destinations.count == topology.sections.count else {
+            throw SpacesAdapterError.activeDesktopUnavailable
+        }
+        return destinations
     }
 
     public func apply(
@@ -275,6 +368,59 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         try sessionBindingUpdater.update(appBindings: writtenBindings)
     }
 
+    public func apply(
+        plan: AssignmentApplyPlan,
+        expectedTopology: DisplayTopologySnapshot
+    ) throws {
+        try sessionBindingUpdater.preflight()
+
+        let updates = Dictionary(
+            plan.updates.map { ($0.key.lowercased(), $0.value) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        let deletions = Set(plan.deletions.map { $0.lowercased() })
+        let existing = try readAppBindings()
+        let complete = PersistentBindingReconciler.completeBindings(
+            existing: existing,
+            updates: updates,
+            deletions: deletions
+        )
+
+        guard expectedTopology.displaysHaveSeparateSpaces else {
+            throw SpacesAdapterError.separateSpacesRequired
+        }
+        guard try currentDisplayTopology() == expectedTopology else {
+            throw SpacesAdapterError.displayTopologyChanged
+        }
+        try writeAndActivate(completeBindings: complete)
+    }
+
+    private func writeAndActivate(completeBindings: [String: String]) throws {
+        _ = try? commandRunner.run(
+            executable: "/usr/bin/defaults",
+            arguments: ["delete", "com.apple.spaces", "app-bindings"]
+        )
+        for bundleIdentifier in completeBindings.keys.sorted() {
+            guard let desktopUUID = completeBindings[bundleIdentifier] else { continue }
+            _ = try commandRunner.run(
+                executable: "/usr/bin/defaults",
+                arguments: [
+                    "write", "com.apple.spaces", "app-bindings", "-dict-add",
+                    bundleIdentifier, desktopUUID,
+                ]
+            )
+        }
+        _ = try commandRunner.run(executable: "/usr/bin/killall", arguments: ["Dock"])
+        let written = try readAppBindings()
+        guard written == completeBindings else {
+            let keys = Set(written.keys).union(completeBindings.keys)
+            throw SpacesAdapterError.verificationFailed(
+                bundleIdentifiers: keys.filter { written[$0] != completeBindings[$0] }.sorted()
+            )
+        }
+        try sessionBindingUpdater.update(appBindings: written)
+    }
+
     /// The current `app-bindings` dictionary, keeping only its string values.
     private func readAppBindings() throws -> [String: String] {
         let store = try readStore()
@@ -309,17 +455,21 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
 
 public enum SpacesAdapterError: LocalizedError, Equatable {
     case commandFailed(executable: String, status: Int32, message: String)
+    case activeDesktopUnavailable
     case displayEnumerationFailed
     case displayTopologyChanged
     case multipleDisplaysUnsupported
     case noActiveDisplay
     case noDesktopsFound
+    case separateSpacesRequired
     case sessionBindingAPIUnavailable
     case storeFormatChanged
     case verificationFailed(bundleIdentifiers: [String])
 
     public var errorDescription: String? {
         switch self {
+        case .activeDesktopUnavailable:
+            "The currently visible Desktop could not be resolved for every Display."
         case let .commandFailed(executable, status, message):
             "\(executable) failed with status \(status): \(message)"
         case .displayEnumerationFailed:
@@ -332,6 +482,8 @@ public enum SpacesAdapterError: LocalizedError, Equatable {
             "No active display was found."
         case .noDesktopsFound:
             "No Desktops were found on the active display."
+        case .separateSpacesRequired:
+            "Displays have separate Spaces must be enabled to Apply or Arrange. Nothing was changed."
         case .sessionBindingAPIUnavailable:
             "The macOS Desktop session binding API is unavailable."
         case .storeFormatChanged:

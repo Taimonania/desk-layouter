@@ -41,18 +41,25 @@ struct PendingDisplayMigration: Identifiable, Equatable {
     var id: String { displays.map(\.colorSyncUUID).joined(separator: "|") }
 }
 
+private struct DisplayArrangePass {
+    let destination: DesktopAddress
+    let report: ArrangeReport
+}
+
 @MainActor
 final class EditorModel: ObservableObject {
     // Add-flow inputs (the searchable installed-app picker plus the chosen
     // destination Desktop).
     @Published var searchText = ""
     @Published var newAssignmentDesktopNumber = 1
+    @Published var newAssignmentDisplayUUID = ""
     @Published private(set) var selectedBundleIdentifier: String?
     @Published private(set) var applications: [InstalledApplication] = []
     @Published private(set) var selectedApplicationName = "No application selected"
 
     // Board projection + pending state.
     @Published private(set) var columns: [DesktopColumn] = []
+    @Published private(set) var displaySections: [DisplayBoardSection] = []
     // Assignments stranded on Desktops that no longer exist, surfaced as their own
     // labeled sections so they stay visible and recoverable rather than being
     // dropped (issue #52). Empty when every Assignment targets a Desktop that
@@ -81,6 +88,7 @@ final class EditorModel: ObservableObject {
     private var presetLibrary: PresetLibrary
     private var selectedApplication: SelectedApplication?
     private var latestDesktopSnapshot: DesktopSnapshot?
+    private var latestDisplayTopology: DisplayTopologySnapshot?
 
     // Runtime Arrange state (issue #27, ADR-0003; settling policy issue #62). The
     // arming policy and the bounded settling/retry across Desktop transitions live
@@ -90,35 +98,15 @@ final class EditorModel: ObservableObject {
     // scheduler the coordinator retries on.
     private let transitionScheduler: any TransitionScheduler
     private var spaceChangeObserver: NSObjectProtocol?
-
-    /// Coordinates the runtime Arrange cycle: it holds the arming set and, because
-    /// `activeSpaceDidChangeNotification` fires before the new Desktop's live Space
-    /// and Accessibility windows are ready (issue #62), waits for the transition to
-    /// settle — retrying against the freshly re-resolved live Desktop — before an
-    /// armed Desktop is completed. The live side effects are supplied here as
-    /// closures; the policy itself is exercised deterministically in
-    /// `DeskLayouterTransitionTests`. Built lazily so its closures can capture a
-    /// fully-initialized `self`.
-    private lazy var transitionCoordinator = ArrangeTransitionCoordinator(
-        scheduler: transitionScheduler,
-        resolveActiveDesktop: { [weak self] in self?.liveActiveDesktopNumber() ?? nil },
-        performArrange: { [weak self] desktop in (self?.arrangePass(forDesktop: desktop)) ?? nil },
-        presentReport: { [weak self] report, activeDesktop, pendingDesktops in
-            guard let self else { return }
-            feedback = arrangeFeedback(
-                for: report,
-                activeDesktop: activeDesktop,
-                pendingDesktops: pendingDesktops
-            )
-        },
-        stopObserving: { [weak self] in self?.stopObservingSpaceChanges() }
-    )
+    private var multiDisplayArrangePlan = MultiDisplayArrangePlan()
+    private var multiDisplayArrangeGeneration = 0
 
     /// The latest availability-aware projection of the board against the live
     /// system (issue #52). Core owns the surfacing and Apply-gating rules; this
     /// model stores the projection and reads its computed facts rather than
     /// re-deriving them, so "what blocks Apply" lives in exactly one place.
     private var boardProjection = BoardProjection(availableColumns: [], unavailableDesktops: [])
+    private var displayBoardProjection = DisplayBoardProjection(sections: [])
 
     init(
         assignmentPlanner: AssignmentPlanner = AssignmentPlanner(),
@@ -162,7 +150,26 @@ final class EditorModel: ObservableObject {
 
     /// True when a Desktop snapshot is available, so the editor can offer Desktop
     /// choices and accept new Assignments.
-    var canEditAssignments: Bool { desktopCount > 0 }
+    var canEditAssignments: Bool {
+        latestDisplayTopology?.displaysHaveSeparateSpaces == true
+            && !assignmentDestinations.isEmpty
+    }
+
+    /// Every explicit physical Display/Desktop choice offered by Add and Move To.
+    var assignmentDestinations: [DesktopAddress] {
+        latestDisplayTopology?.sections.flatMap { section in
+            section.orderedDesktopUUIDs.indices.map { index in
+                DesktopAddress(display: section.newAssignmentDisplay, desktopNumber: index + 1)
+            }
+        } ?? []
+    }
+
+    var selectedAssignmentDisplay: DisplayIdentity? {
+        latestDisplayTopology?.sections.first {
+            $0.newAssignmentDisplay.colorSyncUUID.caseInsensitiveCompare(newAssignmentDisplayUUID)
+                == .orderedSame
+        }?.newAssignmentDisplay
+    }
 
     /// True when there are pending changes to write *and* a single active
     /// Display resolved, so Apply is enabled. Apply is disabled on a clean board,
@@ -178,9 +185,8 @@ final class EditorModel: ObservableObject {
     /// bundle identifiers stay declarative data that takes effect if reinstalled.
     var canApply: Bool {
         !currentPendingChanges.isEmpty
-            && desktopCount > 0
-            && !hasUnavailableDisplayAssignments
-            && !hasUnavailableDesktopAssignments
+            && latestDisplayTopology?.displaysHaveSeparateSpaces == true
+            && currentApplyPlan.map { !$0.updates.isEmpty || !$0.deletions.isEmpty } == true
             && pendingDisplayMigration == nil
     }
 
@@ -189,26 +195,35 @@ final class EditorModel: ObservableObject {
     /// skipped Assignment's existing macOS binding is never treated as a managed
     /// key to delete.
     var hasUnavailableDisplayAssignments: Bool {
-        board.hasUnavailableDisplayAssignments(on: latestDesktopSnapshot)
+        guard let topology = latestDisplayTopology else {
+            return !board.configuration.managedApplications.isEmpty
+        }
+        return board.configuration.managedApplications.contains { application in
+            guard let display = application.display else { return true }
+            return topology.section(containing: display) == nil
+        }
     }
 
     /// True when at least one Assignment targets a Desktop that no longer exists,
     /// so the board shows the unavailable sections and Apply is blocked. Reads the
     /// Core projection's rule directly — the single source of truth.
-    var hasUnavailableDesktopAssignments: Bool { boardProjection.hasUnavailableDesktopAssignments }
+    var hasUnavailableDesktopAssignments: Bool {
+        displayBoardProjection.hasUnavailableDesktopAssignments
+            || boardProjection.hasUnavailableDesktopAssignments
+    }
 
     /// Explanatory feedback shown beside Apply while it is blocked by unavailable
     /// Desktops, naming exactly which Desktops must be cleared so the user knows
     /// what to fix. `nil` when Apply is not blocked for this reason.
     var applyBlockedExplanation: String? {
-        if hasUnavailableDisplayAssignments {
-            return "Apply is disabled: one or more Assignments target a physical Display that is not currently available. Nothing is dropped — reconnect that Display to Apply these Assignments."
+        if latestDisplayTopology?.displaysHaveSeparateSpaces == false {
+            return "Turn on Displays have separate Spaces in System Settings to Apply or Arrange. Your board and pending edits are preserved; nothing was changed."
         }
-        guard hasUnavailableDesktopAssignments else { return nil }
-        let numbers = boardProjection.unavailableDesktopNumbers
-        let list = numbers.map(String.init).joined(separator: ", ")
-        let desktopNoun = numbers.count == 1 ? "Desktop" : "Desktops"
-        return "Apply is disabled: move every app off unavailable \(desktopNoun) \(list) to a Desktop that exists. Nothing is dropped — your Assignments stay until you move them."
+        if currentApplyPlan.map({ $0.updates.isEmpty && $0.deletions.isEmpty }) == true,
+           !currentPendingChanges.isEmpty {
+            return "Nothing resolvable can be Applied right now. Unavailable Display and Desktop Assignments remain pending and their macOS bindings are preserved."
+        }
+        return nil
     }
 
     /// True when at least one managed app carries a valid Layout, so Arrange has
@@ -216,7 +231,10 @@ final class EditorModel: ObservableObject {
     /// Layout does not dirty the board, so Arrange must not gate on pending
     /// Assignment changes (issue #27).
     var canArrange: Bool {
-        board.configuration.managedApplications.contains(where: \.hasValidLayout)
+        guard let topology = latestDisplayTopology,
+              topology.displaysHaveSeparateSpaces
+        else { return false }
+        return !layoutDestinations(in: topology).isEmpty
     }
 
     /// The single status presentation shown above the footer. Latest action
@@ -257,17 +275,38 @@ final class EditorModel: ObservableObject {
     func refreshDesktops() {
         if prepareDisplayMigrationIfNeeded() {
             latestDesktopSnapshot = nil
+            latestDisplayTopology = nil
             desktopCount = 0
             refreshProjection()
             return
         }
         do {
-            let snapshot = try spacesAdapter.currentDesktopSnapshot()
-            latestDesktopSnapshot = snapshot
-            desktopCount = snapshot.orderedDesktopUUIDs.count
-            newAssignmentDesktopNumber = min(max(newAssignmentDesktopNumber, 1), max(desktopCount, 1))
+            let topology = try spacesAdapter.currentDisplayTopology()
+            latestDisplayTopology = topology
+            let first = topology.sections.first
+            latestDesktopSnapshot = first.map {
+                DesktopSnapshot(display: $0.primaryDisplay, orderedDesktopUUIDs: $0.orderedDesktopUUIDs)
+            }
+            if !topology.sections.contains(where: {
+                $0.newAssignmentDisplay.colorSyncUUID.caseInsensitiveCompare(newAssignmentDisplayUUID)
+                    == .orderedSame
+            }) {
+                newAssignmentDisplayUUID = first?.newAssignmentDisplay.colorSyncUUID ?? ""
+            }
+            let selectedCount = topology.sections.first {
+                $0.newAssignmentDisplay.colorSyncUUID.caseInsensitiveCompare(newAssignmentDisplayUUID)
+                    == .orderedSame
+            }?.orderedDesktopUUIDs.count ?? 0
+            desktopCount = selectedCount
+            newAssignmentDesktopNumber = min(max(newAssignmentDesktopNumber, 1), max(selectedCount, 1))
+            if topology.automaticallyRearrangesSpaces {
+                feedback = .info("Automatic Space rearrangement is enabled. Desktop numbers are positional and may change, but Apply and Arrange remain available.")
+            } else if !topology.displaysHaveSeparateSpaces {
+                feedback = .info("Displays have separate Spaces is off. Your board is preserved, and Apply and Arrange are disabled until you turn it on.")
+            }
         } catch {
             latestDesktopSnapshot = nil
+            latestDisplayTopology = nil
             desktopCount = 0
             feedback = .failure(error.localizedDescription)
         }
@@ -302,7 +341,7 @@ final class EditorModel: ObservableObject {
             feedback = .info("No Desktops are available on the active display.")
             return
         }
-        guard let display = latestDesktopSnapshot?.display else {
+        guard let display = selectedAssignmentDisplay else {
             feedback = .failure("The physical Display could not be identified. No Assignment was added.")
             return
         }
@@ -328,11 +367,33 @@ final class EditorModel: ObservableObject {
     /// arrow controls call here. A move to the same Desktop, or of an unmanaged
     /// bundle identifier, changes nothing.
     func move(bundleIdentifier: String, toDesktop desktopNumber: Int) {
-        guard canEditAssignments, (1...desktopCount).contains(desktopNumber) else {
+        guard let application = board.configuration.managedApplication(for: bundleIdentifier),
+              let display = application.display
+        else {
             return
         }
+        move(bundleIdentifier: bundleIdentifier, toDisplay: display, desktopNumber: desktopNumber)
+    }
+
+    /// The explicit Move To path used by cross-Display drag/drop, menus, keyboard,
+    /// and assistive technologies.
+    func move(
+        bundleIdentifier: String,
+        toDisplay display: DisplayIdentity,
+        desktopNumber: Int
+    ) {
+        guard canEditAssignments,
+              latestDisplayTopology?.concreteDesktopUUID(
+                display: display,
+                desktopNumber: desktopNumber
+              ) != nil
+        else { return }
         mutateAndPersist(info: "Moved to Desktop \(desktopNumber). Click Apply to enforce it.") {
-            $0.move(bundleIdentifier: bundleIdentifier, toDesktop: desktopNumber)
+            $0.move(
+                bundleIdentifier: bundleIdentifier,
+                toDisplay: display,
+                desktopNumber: desktopNumber
+            )
         }
     }
 
@@ -351,8 +412,11 @@ final class EditorModel: ObservableObject {
         else {
             return
         }
-        let target = min(max(application.desktopNumber + offset, 1), desktopCount)
-        move(bundleIdentifier: bundleIdentifier, toDesktop: target)
+        guard let display = application.display,
+              let count = latestDisplayTopology?.section(containing: display)?.orderedDesktopUUIDs.count
+        else { return }
+        let target = min(max(application.desktopNumber + offset, 1), count)
+        move(bundleIdentifier: bundleIdentifier, toDisplay: display, desktopNumber: target)
     }
 
     /// Removes an Assignment from the board. Only this app is affected; the app
@@ -390,36 +454,29 @@ final class EditorModel: ObservableObject {
             return
         }
         do {
-            let snapshot = try spacesAdapter.currentDesktopSnapshot()
+            let topology = try spacesAdapter.currentDisplayTopology()
             // Refresh the gate from the exact snapshot planning will consume.
             // The active physical Display or Desktop count may have changed since
             // the last UI refresh; using the cached gate could let the planner
             // skip an Assignment while the adapter still treated its key as
             // managed and deleted its existing binding. A later topology change
             // is independently caught by the adapter's expected-snapshot check.
-            latestDesktopSnapshot = snapshot
-            desktopCount = snapshot.orderedDesktopUUIDs.count
+            latestDisplayTopology = topology
             refreshProjection()
             if let explanation = applyBlockedExplanation {
                 feedback = .info(explanation)
                 return
             }
-            let managedBindings = assignmentPlanner.appBindings(
-                for: board.configuration.assignments,
-                on: snapshot
-            )
-            try spacesAdapter.apply(
-                managedBindings: managedBindings,
-                managedBundleIdentifiers: board.configuration.ownedBundleIdentifiers,
-                // Revalidated against a fresh read just before the first mutation
-                // so a display change between this snapshot and Apply aborts
-                // without writing (issue #18, AC 8).
-                expectedSnapshot: snapshot
-            )
+            let plan = assignmentPlanner.applyPlan(configuration: board.configuration, on: topology)
+            guard !plan.updates.isEmpty || !plan.deletions.isEmpty else {
+                feedback = .info(applyBlockedExplanation ?? "Nothing resolvable can be Applied.")
+                return
+            }
+            try spacesAdapter.apply(plan: plan, expectedTopology: topology)
             // Capture what changed in this Apply before advancing the baseline, so
             // the summary names only the apps whose Desktop actually changed.
-            let changedIdentifiers = Set(board.pendingChanges(on: snapshot))
-            board.markApplied(effectiveDesktopUUIDs: managedBindings)
+            let changedIdentifiers = Set(board.pendingChanges(on: topology))
+            board.markApplied(plan)
             var message = appliedSummary(changedIdentifiers: changedIdentifiers)
             do {
                 try boardStateStore.save(board)
@@ -471,88 +528,56 @@ final class EditorModel: ObservableObject {
     /// down entirely. Pressing again re-arms from scratch. Windows that resisted
     /// the move are surfaced in the feedback rather than dropped silently.
     func arrange() {
-        let applications = board.configuration.managedApplications
-
-        // Resolve the Desktop that is LIVE-active in the current WindowServer
-        // session (issue #61). This is deliberately not the exported store's
-        // `Current Space`, which can lag behind the session. If it cannot be
-        // resolved or mapped, fail closed: move no windows and arm no Desktop, so
-        // no Desktop is wrongly treated as completed.
-        guard let activeDesktop = try? spacesAdapter.activeDesktopNumber() else {
-            feedback = .failure(
-                "Could not determine the active Desktop, so nothing was arranged. "
-                    + "Make sure a single display is active, then press Arrange again."
-            )
+        guard let topology = latestDisplayTopology,
+              topology.displaysHaveSeparateSpaces
+        else {
+            feedback = .info(applyBlockedExplanation ?? "Displays have separate Spaces is required to Arrange.")
+            return
+        }
+        let activeDestinations: Set<DesktopAddress>
+        do {
+            activeDestinations = try spacesAdapter.activeDesktopDestinations(in: topology)
+        } catch {
+            feedback = .failure("Could not determine the visible Desktop on every Display, so nothing was arranged: \(error.localizedDescription)")
             return
         }
 
-        // Immediately arrange the active Desktop, passing only the applications
-        // assigned to it. The engine only reaches the active Space, so scoping to
-        // this Desktop's apps means apps on other Desktops are neither moved nor
-        // reported during this pass.
-        let activeDesktopApplications = ArrangeEngine.applications(
-            applications,
-            assignedToDesktop: activeDesktop
-        )
-        guard let report = runArrange(activeDesktopApplications) else { return }
+        let destinationsWithLayouts = layoutDestinations(in: topology)
+        var passes: [DisplayArrangePass] = []
+        for destination in sortedDestinations(activeDestinations.intersection(destinationsWithLayouts), in: topology) {
+            let applications = ArrangeEngine.applications(
+                board.configuration.managedApplications,
+                assignedTo: destination,
+                in: topology
+            )
+            guard let report = runArrange(applications, on: destination.display) else { return }
+            passes.append(DisplayArrangePass(destination: destination, report: report))
+        }
 
-        // Arm the other Desktops that have Layouts. `activeDesktop` is excluded
-        // because it was just arranged above. Re-pressing starts a fresh cycle and
-        // invalidates any settling attempt still pending from a previous press
-        // (issue #62).
-        let desktopsWithLayouts = Set(
-            applications.filter(\.hasValidLayout).map(\.desktopNumber)
-        )
-        let shouldObserve = transitionCoordinator.press(
-            desktopsWithLayouts: desktopsWithLayouts,
-            activeDesktop: activeDesktop
+        multiDisplayArrangeGeneration += 1
+        let shouldObserve = multiDisplayArrangePlan.press(
+            destinationsWithLayouts: destinationsWithLayouts,
+            visibleDestinations: activeDestinations
         )
         if shouldObserve {
             startObservingSpaceChanges()
         } else {
             stopObservingSpaceChanges()
         }
-
-        feedback = arrangeFeedback(
-            for: report,
-            activeDesktop: activeDesktop,
-            pendingDesktops: Array(transitionCoordinator.armedDesktops)
-        )
+        feedback = displayArrangeFeedback(for: passes, topology: topology)
     }
 
-    /// The live active Desktop number, or `nil` when it cannot be resolved. Wraps
-    /// the throwing adapter read so the coordinator sees a clean optional and
-    /// treats an unresolved read as "unknown" — retried during a transition rather
-    /// than acted on (issue #61, #62).
-    private func liveActiveDesktopNumber() -> Int? {
-        (try? spacesAdapter.activeDesktopNumber()) ?? nil
-    }
-
-    /// Runs one settling Arrange pass scoped to `desktop`'s applications, reusing
-    /// the same engine scoping and error-to-feedback mapping as the immediate
-    /// pass. Returns `nil` when the pass could not run (feedback already set).
-    private func arrangePass(forDesktop desktop: Int) -> ArrangeReport? {
-        let desktopApplications = ArrangeEngine.applications(
-            board.configuration.managedApplications,
-            assignedToDesktop: desktop
-        )
-        return runArrange(desktopApplications)
-    }
-
-    /// Runs one Arrange pass, translating the engine's thrown errors into
-    /// user-facing feedback. Returns the report on success, or `nil` when the pass
-    /// could not run (feedback already set) so the caller aborts arming.
-    private func runArrange(_ applications: [ManagedApplication]) -> ArrangeReport? {
+    private func runArrange(
+        _ applications: [ManagedApplication],
+        on display: DisplayIdentity
+    ) -> ArrangeReport? {
         do {
-            return try windowArranger.arrange(managedApplications: applications)
+            return try windowArranger.arrange(managedApplications: applications, on: display)
         } catch WindowArrangeError.accessibilityNotGranted {
-            feedback = .failure(
-                "Grant Desk Layouter Accessibility access in System Settings > "
-                    + "Privacy & Security > Accessibility, then press Arrange again. Nothing was moved."
-            )
+            feedback = .failure("Grant Desk Layouter Accessibility access in System Settings > Privacy & Security > Accessibility, then press Arrange again. Nothing was moved.")
             return nil
         } catch WindowArrangeError.noActiveScreen {
-            feedback = .failure("No active display could be resolved to arrange against. Nothing was moved.")
+            feedback = .failure("The destination Display could not be resolved for Arrange. Nothing else was moved.")
             return nil
         } catch {
             feedback = .failure("Arrange failed: \(error.localizedDescription)")
@@ -560,39 +585,132 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    /// Builds the feedback after an Arrange pass: it names the affected
-    /// application display names and the numbered active Desktop, names any
-    /// Desktops still armed for their first visit, names applications skipped for
-    /// having no available window, and — as a distinct error — names any windows
-    /// that refused to move or resize (issue #34 acceptance criteria). The pure
-    /// wording lives in `ArrangeReportPresenter`; this only maps the engine's
-    /// bundle identifiers to display names and threads the presenter's tone into
-    /// the view's success/failure styling.
-    private func arrangeFeedback(
-        for report: ArrangeReport,
-        activeDesktop: Int?,
-        pendingDesktops: [Int]
+    private func layoutDestinations(
+        in topology: DisplayTopologySnapshot
+    ) -> Set<DesktopAddress> {
+        Set(board.configuration.managedApplications.compactMap { application in
+            guard application.hasValidLayout,
+                  let display = application.display,
+                  let section = topology.section(containing: display),
+                  section.concreteDesktopUUID(at: application.desktopNumber) != nil
+            else { return nil }
+            return DesktopAddress(
+                display: section.primaryDisplay,
+                desktopNumber: application.desktopNumber
+            )
+        })
+    }
+
+    private func sortedDestinations(
+        _ destinations: Set<DesktopAddress>,
+        in topology: DisplayTopologySnapshot
+    ) -> [DesktopAddress] {
+        let order = Dictionary(
+            uniqueKeysWithValues: topology.sections.enumerated().map {
+                ($0.element.primaryDisplay.colorSyncUUID.lowercased(), $0.offset)
+            }
+        )
+        return destinations.sorted { lhs, rhs in
+            let left = order[lhs.display.colorSyncUUID.lowercased()] ?? .max
+            let right = order[rhs.display.colorSyncUUID.lowercased()] ?? .max
+            return left == right ? lhs.desktopNumber < rhs.desktopNumber : left < right
+        }
+    }
+
+    private func displayArrangeFeedback(
+        for passes: [DisplayArrangePass],
+        topology: DisplayTopologySnapshot
     ) -> EditorFeedback {
-        let displayNames = Dictionary(
+        let names = Dictionary(
             board.configuration.managedApplications.map { ($0.bundleIdentifier, $0.displayName) },
             uniquingKeysWith: { first, _ in first }
         )
-        func displayName(for bundleIdentifier: String) -> String {
-            displayNames[bundleIdentifier] ?? bundleIdentifier
+        let announcements = passes.map { pass -> ArrangeReportPresenter.Announcement in
+            let section = topology.section(containing: pass.destination.display)
+            let report = pass.report
+            return ArrangeReportPresenter.announce(
+                displayName: section.map { topology.displayName(for: $0) }
+                    ?? pass.destination.display.lastKnownName,
+                desktopNumber: pass.destination.desktopNumber,
+                arranged: report.arranged.map { names[$0] ?? $0 },
+                skipped: report.skipped.map { names[$0] ?? $0 },
+                resisted: report.resisted.map(\.displayName)
+            )
+        }
+        var message = announcements.map(\.message).joined(separator: " ")
+        let armed = sortedDestinations(multiDisplayArrangePlan.armedDestinations, in: topology)
+        if !armed.isEmpty {
+            let destinations = armed.map { destination in
+                let displayName = topology.section(containing: destination.display)
+                    .map { topology.displayName(for: $0) }
+                    ?? destination.display.lastKnownName
+                return "\(displayName) Desktop \(destination.desktopNumber)"
+            }.joined(separator: ", ")
+            message += " Waiting to arrange \(destinations) on first visit."
+        }
+        if message.isEmpty { message = "No valid Layouts are visible to arrange." }
+        return announcements.contains(where: { $0.tone == .failure })
+            ? .failure(message)
+            : .success(message)
+    }
+
+    private func settleMultiDisplayArrange(generation: Int, attemptsRemaining: Int) {
+        guard generation == multiDisplayArrangeGeneration,
+              multiDisplayArrangePlan.isObserving,
+              let topology = latestDisplayTopology
+        else { return }
+
+        let active: Set<DesktopAddress>
+        do {
+            active = try spacesAdapter.activeDesktopDestinations(in: topology)
+        } catch {
+            if attemptsRemaining > 0 {
+                transitionScheduler.schedule(after: 0.1) { [weak self] in
+                    self?.settleMultiDisplayArrange(
+                        generation: generation,
+                        attemptsRemaining: attemptsRemaining - 1
+                    )
+                }
+            }
+            return
         }
 
-        let announcement = ArrangeReportPresenter.announce(
-            activeDesktop: activeDesktop,
-            arranged: report.arranged.map(displayName(for:)),
-            skipped: report.skipped.map(displayName(for:)),
-            resisted: report.resisted.map(\.displayName),
-            pendingDesktops: pendingDesktops
-        )
-        switch announcement.tone {
-        case .success:
-            return .success(announcement.message)
-        case .failure:
-            return .failure(announcement.message)
+        let candidates = multiDisplayArrangePlan.armedDestinations.intersection(active)
+        guard !candidates.isEmpty else {
+            if attemptsRemaining > 0 {
+                transitionScheduler.schedule(after: 0.1) { [weak self] in
+                    self?.settleMultiDisplayArrange(generation: generation, attemptsRemaining: attemptsRemaining - 1)
+                }
+            }
+            return
+        }
+
+        var completed: Set<DesktopAddress> = []
+        var passes: [DisplayArrangePass] = []
+        var needsRetry = false
+        for destination in sortedDestinations(candidates, in: topology) {
+            let applications = ArrangeEngine.applications(
+                board.configuration.managedApplications,
+                assignedTo: destination,
+                in: topology
+            )
+            guard let report = runArrange(applications, on: destination.display) else { return }
+            let foundWindow = !report.arranged.isEmpty || !report.resisted.isEmpty
+            if foundWindow || attemptsRemaining == 0 {
+                completed.insert(destination)
+                passes.append(DisplayArrangePass(destination: destination, report: report))
+            } else {
+                needsRetry = true
+            }
+        }
+        _ = multiDisplayArrangePlan.completeVisible(completed)
+        if !passes.isEmpty { feedback = displayArrangeFeedback(for: passes, topology: topology) }
+        if !multiDisplayArrangePlan.isObserving {
+            stopObservingSpaceChanges()
+        } else if needsRetry, attemptsRemaining > 0 {
+            transitionScheduler.schedule(after: 0.1) { [weak self] in
+                self?.settleMultiDisplayArrange(generation: generation, attemptsRemaining: attemptsRemaining - 1)
+            }
         }
     }
 
@@ -610,7 +728,11 @@ final class EditorModel: ObservableObject {
                 // Hand the notification to the coordinator, which starts a bounded
                 // settling cycle instead of acting synchronously on a transition
                 // that has not settled yet (issue #62).
-                self?.transitionCoordinator.spaceChangeNotified()
+                guard let self else { return }
+                let generation = self.multiDisplayArrangeGeneration
+                self.transitionScheduler.schedule(after: 0.1) { [weak self] in
+                    self?.settleMultiDisplayArrange(generation: generation, attemptsRemaining: 25)
+                }
             }
         }
     }
@@ -1021,6 +1143,16 @@ final class EditorModel: ObservableObject {
     }
 
     private func refreshProjection() {
+        if let topology = latestDisplayTopology {
+            displayBoardProjection = board.projection(
+                on: topology,
+                installedBundleIdentifiers: Set(applications.map(\.bundleIdentifier))
+            )
+            displaySections = displayBoardProjection.sections
+        } else {
+            displayBoardProjection = DisplayBoardProjection(sections: [])
+            displaySections = []
+        }
         boardProjection = board.projection(
             desktopCount: desktopCount,
             installedBundleIdentifiers: Set(applications.map(\.bundleIdentifier))
@@ -1031,7 +1163,26 @@ final class EditorModel: ObservableObject {
     }
 
     private var currentPendingChanges: [String] {
-        board.pendingChanges(on: latestDesktopSnapshot)
+        if let topology = latestDisplayTopology {
+            return board.pendingChanges(on: topology)
+        }
+        return board.pendingChanges(on: latestDesktopSnapshot)
+    }
+
+    private var currentApplyPlan: AssignmentApplyPlan? {
+        guard let topology = latestDisplayTopology else { return nil }
+        return assignmentPlanner.applyPlan(configuration: board.configuration, on: topology)
+    }
+
+    /// Keeps the Desktop picker valid when the user explicitly chooses another
+    /// physical Display in the Add flow.
+    func selectNewAssignmentDisplay(uuid: String) {
+        newAssignmentDisplayUUID = uuid
+        let count = latestDisplayTopology?.sections.first {
+            $0.newAssignmentDisplay.colorSyncUUID.caseInsensitiveCompare(uuid) == .orderedSame
+        }?.orderedDesktopUUIDs.count ?? 0
+        desktopCount = count
+        newAssignmentDesktopNumber = min(max(newAssignmentDesktopNumber, 1), max(count, 1))
     }
 
     /// Resolves legacy Assignments before the editor exposes any mutating action.

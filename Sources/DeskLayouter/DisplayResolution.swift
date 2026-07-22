@@ -18,17 +18,23 @@ public struct ActiveDisplay: Equatable, Sendable {
     /// secondary. Mirror secondaries collapse into their master's logical
     /// Display, so a mirrored group counts as one Display rather than several.
     public let mirrorsDisplayID: UInt32
+    public let isBuiltIn: Bool
+    public let bounds: DisplayBounds
 
     public init(
         displayID: UInt32,
         isMain: Bool,
         mirrorsDisplayID: UInt32,
-        identity: DisplayIdentity? = nil
+        identity: DisplayIdentity? = nil,
+        isBuiltIn: Bool = false,
+        bounds: DisplayBounds = DisplayBounds(x: 0, y: 0, width: 0, height: 0)
     ) {
         self.displayID = displayID
         self.isMain = isMain
         self.mirrorsDisplayID = mirrorsDisplayID
         self.identity = identity
+        self.isBuiltIn = isBuiltIn
+        self.bounds = bounds
     }
 }
 
@@ -39,6 +45,25 @@ public struct ActiveDisplay: Equatable, Sendable {
 /// and multiple extended) without real hardware.
 public protocol DisplayInventoryProviding {
     func activeDisplays() throws -> [ActiveDisplay]
+}
+
+/// Mission Control settings that change whether physical Displays are valid
+/// independent destinations and whether positional Desktop numbers may move.
+public protocol DisplaySettingsProviding {
+    var displaysHaveSeparateSpaces: Bool { get }
+    var automaticallyRearrangesSpaces: Bool { get }
+}
+
+public struct SystemDisplaySettingsProvider: DisplaySettingsProviding {
+    public init() {}
+
+    public var displaysHaveSeparateSpaces: Bool { NSScreen.screensHaveSeparateSpaces }
+
+    public var automaticallyRearrangesSpaces: Bool {
+        let domain = UserDefaults.standard.persistentDomain(forName: "com.apple.dock")
+        if let number = domain?["mru-spaces"] as? NSNumber { return number.boolValue }
+        return false
+    }
 }
 
 /// Reads the live active managed Space ID from the current WindowServer session.
@@ -53,6 +78,13 @@ public protocol ActiveSpaceProviding {
     /// unavailable private ABI or a WindowServer that reports no space). A `nil`
     /// makes the active Desktop unresolvable, so Arrange fails closed.
     func activeManagedSpaceID() throws -> UInt64?
+}
+
+/// Reads the currently visible managed Space on every logical Display. The keys
+/// use the same runtime-only private identifiers as the Spaces store (`Main` or
+/// a non-main physical UUID).
+public protocol ActiveDisplaySpacesProviding {
+    func activeManagedSpaceIDsByDisplayKey() throws -> [String: UInt64]
 }
 
 private typealias ActiveSpaceMainConnection = @convention(c) () -> Int32
@@ -89,6 +121,45 @@ public struct SkyLightActiveSpaceProvider: ActiveSpaceProviding {
     }
 }
 
+private typealias CopyManagedDisplaySpacesFunction = @convention(c) (Int32) -> Unmanaged<CFArray>?
+
+/// Production per-Display active-Space reader. `SLSCopyManagedDisplaySpaces`
+/// exposes the live WindowServer view for every Display; unlike the exported
+/// preferences store it is not a lagging persistence snapshot.
+public struct SkyLightActiveDisplaySpacesProvider: ActiveDisplaySpacesProviding {
+    public init() {}
+
+    public func activeManagedSpaceIDsByDisplayKey() throws -> [String: UInt64] {
+        guard let skyLight = dlopen(
+            "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+            RTLD_NOW
+        ) else { throw SpacesAdapterError.sessionBindingAPIUnavailable }
+        defer { dlclose(skyLight) }
+        guard
+            let connectionSymbol = dlsym(skyLight, "SLSMainConnectionID")
+                ?? dlsym(skyLight, "CGSMainConnectionID"),
+            let copySymbol = dlsym(skyLight, "SLSCopyManagedDisplaySpaces")
+                ?? dlsym(skyLight, "CGSCopyManagedDisplaySpaces")
+        else { throw SpacesAdapterError.sessionBindingAPIUnavailable }
+
+        let connection = unsafeBitCast(connectionSymbol, to: ActiveSpaceMainConnection.self)
+        let copy = unsafeBitCast(copySymbol, to: CopyManagedDisplaySpacesFunction.self)
+        guard let array = copy(connection())?.takeRetainedValue() as? [[String: Any]] else {
+            throw SpacesAdapterError.storeFormatChanged
+        }
+        var result: [String: UInt64] = [:]
+        for display in array {
+            guard
+                let key = display["Display Identifier"] as? String,
+                let current = display["Current Space"] as? [String: Any],
+                let id = current["ManagedSpaceID"] as? NSNumber
+            else { continue }
+            result[key] = id.uint64Value
+        }
+        return result
+    }
+}
+
 /// Pure display-topology and private-store resolution.
 ///
 /// Kept separate from the CoreGraphics/`defaults` I/O so both rules can be
@@ -99,6 +170,57 @@ public enum DisplayResolution {
     /// primary Display macOS exposes as the independent Desktop host.
     public static func logicalDisplays(from displays: [ActiveDisplay]) -> [ActiveDisplay] {
         displays.filter { $0.mirrorsDisplayID == 0 }
+    }
+
+    /// Resolves the complete active topology, grouping mirror members around
+    /// their primary and reading every extended Display's own ordered Desktops.
+    public static func topology(
+        from displays: [ActiveDisplay],
+        store: [String: Any],
+        displaysHaveSeparateSpaces: Bool,
+        automaticallyRearrangesSpaces: Bool
+    ) throws -> DisplayTopologySnapshot {
+        let primaries = logicalDisplays(from: displays)
+        guard !primaries.isEmpty else { throw SpacesAdapterError.noActiveDisplay }
+
+        let sections = try primaries.map { primary -> DisplayDesktopSectionSnapshot in
+            guard let primaryIdentity = primary.identity else {
+                throw SpacesAdapterError.displayEnumerationFailed
+            }
+            let mirrorMembers = displays.filter {
+                $0.displayID == primary.displayID || $0.mirrorsDisplayID == primary.displayID
+            }
+            let identities = mirrorMembers.compactMap(\.identity)
+            guard identities.count == mirrorMembers.count else {
+                throw SpacesAdapterError.displayEnumerationFailed
+            }
+
+            let desktopUUIDs: [String]
+            if displaysHaveSeparateSpaces || primary.isMain {
+                desktopUUIDs = try orderedDesktopUUIDs(
+                    fromStore: store,
+                    displayKey: try displayKey(for: primary)
+                )
+            } else {
+                // Without separate Spaces a non-main Display is not an
+                // independent destination. Keep the section/identity visible,
+                // but expose no false Desktop targets.
+                desktopUUIDs = []
+            }
+            return DisplayDesktopSectionSnapshot(
+                primaryDisplay: primaryIdentity,
+                memberDisplays: identities,
+                isMain: primary.isMain,
+                isBuiltIn: primary.isBuiltIn,
+                bounds: primary.bounds,
+                orderedDesktopUUIDs: desktopUUIDs
+            )
+        }
+        return DisplayTopologySnapshot(
+            displaysHaveSeparateSpaces: displaysHaveSeparateSpaces,
+            automaticallyRearrangesSpaces: automaticallyRearrangesSpaces,
+            sections: sections
+        )
     }
 
     /// The runtime-only private monitor alias for an active physical Display.
@@ -260,7 +382,7 @@ public enum DisplayResolution {
 struct CoreGraphicsDisplayInventory: DisplayInventoryProviding {
     func activeDisplays() throws -> [ActiveDisplay] {
         var displayCount: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success else {
+        guard CGGetOnlineDisplayList(0, nil, &displayCount) == .success else {
             throw SpacesAdapterError.displayEnumerationFailed
         }
 
@@ -269,18 +391,28 @@ struct CoreGraphicsDisplayInventory: DisplayInventoryProviding {
             count: Int(displayCount)
         )
         guard
-            CGGetActiveDisplayList(displayCount, &displayIdentifiers, &displayCount) == .success
+            CGGetOnlineDisplayList(displayCount, &displayIdentifiers, &displayCount) == .success
         else {
             throw SpacesAdapterError.displayEnumerationFailed
         }
 
         let mainDisplay = CGMainDisplayID()
-        return displayIdentifiers.prefix(Int(displayCount)).map { identifier in
-            ActiveDisplay(
+        return displayIdentifiers.prefix(Int(displayCount)).filter { identifier in
+            CGDisplayIsActive(identifier) != 0 || CGDisplayMirrorsDisplay(identifier) != 0
+        }.map { identifier in
+            let frame = CGDisplayBounds(identifier)
+            return ActiveDisplay(
                 displayID: identifier,
                 isMain: identifier == mainDisplay,
                 mirrorsDisplayID: CGDisplayMirrorsDisplay(identifier),
-                identity: displayIdentity(for: identifier)
+                identity: displayIdentity(for: identifier),
+                isBuiltIn: CGDisplayIsBuiltin(identifier) != 0,
+                bounds: DisplayBounds(
+                    x: frame.origin.x,
+                    y: frame.origin.y,
+                    width: frame.width,
+                    height: frame.height
+                )
             )
         }
     }

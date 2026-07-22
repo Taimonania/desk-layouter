@@ -157,6 +157,16 @@ let package = Package(
             path: "Tests/DeskLayouterDisplayTests"
         ),
         .executableTarget(
+            name: "DeskLayouterMultiDisplayTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterMultiDisplayTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterMultiDisplaySystemTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterMultiDisplaySystemTests"
+        ),
+        .executableTarget(
             name: "DeskLayouterMigrationTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterMigrationTests"
