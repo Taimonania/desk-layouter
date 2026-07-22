@@ -93,6 +93,33 @@ struct AppStateTestRunner {
             )
         }
 
+        // MARK: - AppStateStore: lastSeenVersion
+
+        do {
+            let (defaults, suiteName) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let store = AppStateStore(defaults: defaults)
+            check(
+                "lastSeenVersion is nil on a fresh install",
+                store.lastSeenVersion == nil,
+                "got \(String(describing: store.lastSeenVersion))"
+            )
+        }
+
+        do {
+            let (defaults, suiteName) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            AppStateStore(defaults: defaults).lastSeenVersion = "0.1.2"
+            // A separate store over the same defaults sees the persisted version,
+            // so the What's-New screen shows once per upgrade, not every launch.
+            let reloaded = AppStateStore(defaults: defaults)
+            check(
+                "lastSeenVersion persists across store instances",
+                reloaded.lastSeenVersion == "0.1.2",
+                "got \(String(describing: reloaded.lastSeenVersion))"
+            )
+        }
+
         // MARK: - AppNavigation
 
         do {
@@ -126,6 +153,22 @@ struct AppStateTestRunner {
             check(
                 "showSettings is idempotent when already on Settings",
                 navigation.surface == .settings
+            )
+        }
+
+        do {
+            var navigation = AppNavigation()
+            navigation.showWhatsNew()
+            check(
+                "showWhatsNew swaps to the What's-New surface",
+                navigation.surface == .whatsNew,
+                "got \(navigation.surface)"
+            )
+            navigation.showBoard()
+            check(
+                "showBoard (Done) returns to the board from What's-New",
+                navigation.surface == .board,
+                "got \(navigation.surface)"
             )
         }
 

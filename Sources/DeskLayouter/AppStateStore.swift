@@ -11,6 +11,7 @@ public final class AppStateStore {
     private enum Key {
         static let automaticallyInstallUpdates = "automaticallyInstallUpdates"
         static let hasSeenWelcome = "hasSeenWelcome"
+        static let lastSeenVersion = "lastSeenVersion"
     }
 
     private let defaults: UserDefaults
@@ -38,5 +39,16 @@ public final class AppStateStore {
     public var hasSeenWelcome: Bool {
         get { defaults.bool(forKey: Key.hasSeenWelcome) }
         set { defaults.set(newValue, forKey: Key.hasSeenWelcome) }
+    }
+
+    /// The app version whose What's-New surface the user has already seen (issue
+    /// #73), or `nil` when none has been stored — a fresh install. The What's-New
+    /// surface shows only when the running version is newer than this, and this is
+    /// updated to the running version once the surface is dismissed, so it shows
+    /// once per upgrade. `nil` (fresh install) suppresses What's-New entirely so
+    /// the Welcome tour owns first-run.
+    public var lastSeenVersion: String? {
+        get { defaults.string(forKey: Key.lastSeenVersion) }
+        set { defaults.set(newValue, forKey: Key.lastSeenVersion) }
     }
 }

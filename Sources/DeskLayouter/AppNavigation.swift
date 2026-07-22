@@ -10,6 +10,8 @@ public enum AppSurface: Equatable {
     case board
     /// The full-window Settings surface.
     case settings
+    /// The full-window What's-New surface shown after an upgrade (issue #73).
+    case whatsNew
 }
 
 /// The window's current surface plus the transitions between surfaces. Kept as a
@@ -27,6 +29,12 @@ public struct AppNavigation: Equatable {
     /// Swaps the window content to the full-window Settings surface.
     public mutating func showSettings() {
         surface = .settings
+    }
+
+    /// Swaps the window content to the full-window What's-New surface (issue #73),
+    /// shown on the first launch after an upgrade.
+    public mutating func showWhatsNew() {
+        surface = .whatsNew
     }
 
     /// Returns to the board (the "Done" control on a full-window surface).

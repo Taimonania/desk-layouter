@@ -9,9 +9,10 @@ enum AppWindowMetrics {
 }
 
 /// The window's content root. It swaps between the board (`EditorView`) and the
-/// full-window `SettingsView` based on the navigation state, so a full-window
+/// full-window surfaces — `SettingsView` (issue #71) and the What's-New
+/// `WhatsNewView` (issue #73) — based on the navigation state, so a full-window
 /// surface replaces the board in place rather than opening a sheet or a second
-/// window (issue #71). `AppDelegate` hosts this view in the editor window.
+/// window. `AppDelegate` hosts this view in the editor window.
 struct AppRootView: View {
     @ObservedObject var model: AppRootModel
     let editorModel: EditorModel
@@ -62,6 +63,8 @@ struct AppRootView: View {
             )
         case .settings:
             SettingsView(model: model)
+        case .whatsNew:
+            WhatsNewView(model: model)
         }
     }
 }

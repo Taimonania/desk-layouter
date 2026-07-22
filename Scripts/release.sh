@@ -59,7 +59,11 @@ notary_profile="${NOTARY_KEYCHAIN_PROFILE:-DeskLayouterNotary}"
 release_dir="$repo_dir/.build/release"
 app_bundle="$repo_dir/.build/Desk Layouter.app"
 manifest="$release_dir/manifest.json"
-notes_file="${RELEASE_NOTES_FILE:-$repo_dir/RELEASE_NOTES.md}"
+# CHANGELOG.md is the single source of truth for release notes (issue #73): the
+# app bundles it for the What's-New screen AND this pipeline derives each GitHub
+# release's notes from the matching `## <version> — <date>` section. There is no
+# separate RELEASE_NOTES.md any more.
+changelog_file="$repo_dir/CHANGELOG.md"
 
 die() { print -u2 "release: $1"; exit 1; }
 
@@ -152,6 +156,64 @@ assert_appcast_signed() {
     print "$url"
 }
 
+# --- changelog / release notes (single source: CHANGELOG.md) --------------
+
+# Print the body of CHANGELOG.md's `## <version> — <date>` section for
+# $release_version: every line after that header up to (but not including) the
+# next `## ` header, with leading/trailing blank lines trimmed. Prints nothing if
+# the section is absent. The version is matched exactly as the first token before
+# the ` — ` separator, so `0.1.1` never matches `0.1.10`.
+changelog_section() {
+    [[ -f "$changelog_file" ]] || return 0
+    awk -v ver="$release_version" '
+        /^## / {
+            hdr = substr($0, 4)
+            sep = index(hdr, " — ")
+            v = (sep > 0) ? substr(hdr, 1, sep - 1) : hdr
+            gsub(/^[ \t]+|[ \t]+$/, "", v)
+            inside = (v == ver)
+            next
+        }
+        inside { body = body $0 "\n" }
+        END {
+            # Trim leading/trailing blank lines.
+            gsub(/^\n+/, "", body)
+            gsub(/\n+$/, "", body)
+            if (length(body) > 0) print body
+        }
+    ' "$changelog_file"
+}
+
+# Assert CHANGELOG.md has a non-empty section for $release_version, or die. This
+# is the hard requirement (issue #73): a release cannot be cut without its
+# changelog entry, since both the What's-New screen and the GitHub release notes
+# derive from it.
+require_changelog_entry() {
+    [[ -f "$changelog_file" ]] || die "CHANGELOG.md not found at $changelog_file (issue #73: it is the single source of release notes)"
+    [[ -n "$(changelog_section)" ]] \
+        || die "CHANGELOG.md has no non-empty '## $release_version — <date>' section; add the new version's entry before releasing"
+}
+
+# Compose the GitHub release notes for $release_version into $1, deriving the
+# highlights from CHANGELOG.md and appending the static platform/signing notes
+# (facts that are not per-version highlights, so they live here rather than in the
+# per-version changelog the What's-New screen renders).
+write_release_notes() {
+    local out="$1"
+    require_changelog_entry
+    {
+        print "## Highlights"
+        print ""
+        changelog_section
+        print ""
+        print "## Notes"
+        print ""
+        print -- "- macOS 13+; universal (Apple Silicon + Intel)."
+        print -- "- Signed with a Developer ID identity and notarized by Apple, so it opens without Gatekeeper warnings and keeps its Accessibility grant across updates."
+        print -- "- Updates are delivered as EdDSA-signed archives; the app verifies each update's signature before installing."
+    } > "$out"
+}
+
 # --- preflight ------------------------------------------------------------
 
 do_preflight() {
@@ -178,6 +240,14 @@ do_preflight() {
         # unrelated account must not fail an otherwise-authenticated github.com.
         gh auth status --hostname github.com >/dev/null 2>&1 \
             || missing+=("auth: gh is not authenticated for github.com (gh auth login)")
+    fi
+
+    # The release notes derive from CHANGELOG.md (issue #73); catch a missing
+    # entry here, at preflight, rather than only at the irreversible publish stage.
+    if [[ ! -f "$changelog_file" ]]; then
+        missing+=("notes: CHANGELOG.md not found at $changelog_file")
+    elif [[ -z "$(changelog_section)" ]]; then
+        missing+=("notes: CHANGELOG.md has no '## $release_version — <date>' entry (add it before releasing)")
     fi
 
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -397,9 +467,12 @@ do_publish() {
     [[ -f "$zip_file" ]] || die "no update .zip to publish at $zip_file; run 'appcast' first"
     [[ -f "$appcast_file" ]] || die "no appcast to publish at $appcast_file; run 'appcast' first"
 
-    [[ -f "$notes_file" ]] || die "release notes not found at $notes_file (see docs/releasing.md for the Highlights/Notes template)"
-    grep -q '^## Highlights' "$notes_file" || die "release notes must contain a '## Highlights' section"
-    grep -q '^## Notes' "$notes_file" || die "release notes must contain a '## Notes' section"
+    # Derive the release notes from CHANGELOG.md's entry for this version (issue
+    # #73). write_release_notes hard-requires that entry, so a release cannot be
+    # cut without it — the same section the What's-New screen shows.
+    local notes_file="$release_dir/release-notes.md"
+    mkdir -p "$release_dir"
+    write_release_notes "$notes_file"
 
     # Upload BOTH the human .dmg and the Sparkle update .zip. The appcast
     # enclosure points at the .zip via the GitHub Releases download URL, so it

@@ -23,6 +23,7 @@ let package = Package(
             exclude: [
                 "AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift",
                 "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift", "WelcomeTourOverlay.swift",
+                "WhatsNewView.swift", "BundledChangelog.swift",
             ],
             sources: [
                 "SpacesAdapter.swift",
@@ -40,6 +41,7 @@ let package = Package(
                 "AppStateStore.swift",
                 "AppNavigation.swift",
                 "WelcomeTour.swift",
+                "WhatsNew.swift",
             ]
         ),
         .executableTarget(
@@ -66,6 +68,7 @@ let package = Package(
                 "AppStateStore.swift",
                 "AppNavigation.swift",
                 "WelcomeTour.swift",
+                "WhatsNew.swift",
             ]
         ),
         .executableTarget(
@@ -179,6 +182,11 @@ let package = Package(
             path: "Tests/DeskLayouterVersionTests"
         ),
         .executableTarget(
+            name: "DeskLayouterChangelogTests",
+            dependencies: ["DeskLayouterCore"],
+            path: "Tests/DeskLayouterChangelogTests"
+        ),
+        .executableTarget(
             name: "DeskLayouterAppStateTests",
             dependencies: ["DeskLayouterMacOS"],
             path: "Tests/DeskLayouterAppStateTests"
@@ -187,6 +195,11 @@ let package = Package(
             name: "DeskLayouterWelcomeTourTests",
             dependencies: ["DeskLayouterMacOS"],
             path: "Tests/DeskLayouterWelcomeTourTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterWhatsNewTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterWhatsNewTests"
         ),
     ]
 )
