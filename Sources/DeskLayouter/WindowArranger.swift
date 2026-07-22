@@ -97,6 +97,20 @@ public enum WindowArrangeError: Error, Equatable {
 /// the parts most likely to be wrong — candidate selection, the coordinate flip,
 /// and resisted-window detection — are directly unit-testable.
 public enum ArrangeEngine {
+    /// The managed applications assigned to `desktopNumber` — the only ones a
+    /// single Arrange pass over that Desktop may touch (issue #61). Applications
+    /// assigned to any other Desktop are excluded here, so they are never moved
+    /// nor reported as arranged, skipped, or resistant during this Desktop's pass;
+    /// the arranger only reaches the active Space, so passing them would misreport
+    /// windows that simply live elsewhere. Layout validity is enforced separately
+    /// by ``candidates(from:)``.
+    public static func applications(
+        _ applications: [ManagedApplication],
+        assignedToDesktop desktopNumber: Int
+    ) -> [ManagedApplication] {
+        applications.filter { $0.desktopNumber == desktopNumber }
+    }
+
     /// The managed apps eligible to be arranged: those carrying a non-nil Layout
     /// that also validates. `Layout.targetFrame(in:)` does not validate, so an
     /// invalid Layout is filtered out here rather than producing a garbage rect.
