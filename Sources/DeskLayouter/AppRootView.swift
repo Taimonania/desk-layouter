@@ -40,6 +40,7 @@ struct AppRootView: View {
                     }
                 }
             }
+            .hoverTooltipContainer()
     }
 
     @ViewBuilder

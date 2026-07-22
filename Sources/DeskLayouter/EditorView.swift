@@ -231,7 +231,12 @@ struct EditorView: View {
     // MARK: - Presets
 
     private var presetBar: some View {
-        HStack(spacing: 10) {
+        let selectorMetrics = EditorChromeLayout.presetMetrics(for: .selector)
+        let managementMetrics = EditorChromeLayout.presetMetrics(for: .management)
+        let updateMetrics = EditorChromeLayout.presetMetrics(for: .update)
+        let revertMetrics = EditorChromeLayout.presetMetrics(for: .revert)
+
+        return HStack(spacing: 10) {
             Text("Preset")
                 .foregroundStyle(.secondary)
             Menu {
@@ -252,9 +257,13 @@ struct EditorView: View {
                 }
             } label: {
                 Text(model.presetSelectionLabel)
-                    .frame(minWidth: 120, alignment: .leading)
+                    .frame(
+                        minWidth: selectorMetrics.width,
+                        alignment: .leading
+                    )
                     .fixedSize(horizontal: true, vertical: false)
             }
+            .frame(height: selectorMetrics.height)
             .help("Load a saved Preset as a working copy. Loading never Applies or Arranges.")
             .accessibilityLabel("Preset selector, currently \(model.presetSelectionLabel)")
 
@@ -287,8 +296,11 @@ struct EditorView: View {
             } label: {
                 Image(systemName: "ellipsis")
             }
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .menuIndicator(managementMetrics.hidesMenuIndicator ? .hidden : .automatic)
+            .frame(
+                width: managementMetrics.width,
+                height: managementMetrics.height
+            )
             .help("Manage the selected Preset")
             .accessibilityLabel("Manage Preset \(model.selectedPresetName)")
 
@@ -296,12 +308,16 @@ struct EditorView: View {
                 Button("Update") {
                     model.updateSelectedPreset()
                 }
+                .frame(minWidth: updateMetrics.width)
+                .frame(height: updateMetrics.height)
                 .help("Update Preset \"\(model.selectedPresetName)\" to match the current board")
                 .accessibilityLabel("Update Preset \(model.selectedPresetName)")
 
                 Button("Revert", role: .destructive) {
                     model.requestRevertSelectedPreset()
                 }
+                .frame(minWidth: revertMetrics.width)
+                .frame(height: revertMetrics.height)
                 .help("Restore Preset \"\(model.selectedPresetName)\" over the current board after confirmation")
                 .accessibilityLabel("Revert changes to Preset \(model.selectedPresetName)")
             }
@@ -909,17 +925,74 @@ struct EditorView: View {
             .accessibilityLabel("Status: \(status.message)")
     }
 
-    /// Version and its adjacent update action sit on the left. Apply and Arrange
-    /// share equal width on the right so neither primary action dominates.
+    /// The action group sits at the far left, flexible space separates it from
+    /// the version group, and version remains the rightmost footer element.
     private var footer: some View {
         let version = AppVersion.current()
         return HStack(spacing: 12) {
-            Text(version)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Version \(version)")
+            ForEach(Array(EditorChromeLayout.footerRegions.enumerated()), id: \.offset) { _, region in
+                footerRegion(region, version: version)
+            }
+        }
+    }
 
-            // Only this adjacent control checks for updates; version text is inert.
+    @ViewBuilder
+    private func footerRegion(_ region: EditorChromeLayout.FooterRegion, version: String) -> some View {
+        switch region {
+        case let .actions(actions):
+            let widths = EditorChromeLayout.footerActionWidths(
+                groupWidth: EditorChromeLayout.footerActionGroupWidth
+            )
+            HStack(spacing: EditorChromeLayout.footerActionSpacing) {
+                ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
+                    footerAction(action)
+                        .frame(width: widths[index])
+                }
+            }
+            .frame(width: EditorChromeLayout.footerActionGroupWidth)
+        case .flexibleSpace:
+            Spacer(minLength: 0)
+        case let .version(elements):
+            HStack(spacing: 6) {
+                ForEach(elements, id: \.self) { element in
+                    footerVersionElement(element, version: version)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func footerAction(_ action: EditorChromeLayout.FooterAction) -> some View {
+        switch action {
+        case .apply:
+            Button(applyTitle) {
+                model.apply()
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(!model.canApply)
+            .frame(maxWidth: .infinity)
+            .welcomeAnchor(.applyButton)
+        case .arrange:
+            // Arrange enacts Layouts on live windows and stays independent of
+            // Apply's pending-Assignment gate.
+            Button("Arrange") {
+                model.arrange()
+            }
+            .disabled(!model.canArrange)
+            .frame(maxWidth: .infinity)
+            .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+            .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+            .welcomeAnchor(.arrangeButton)
+        }
+    }
+
+    @ViewBuilder
+    private func footerVersionElement(
+        _ element: EditorChromeLayout.FooterVersionElement,
+        version: String
+    ) -> some View {
+        switch element {
+        case .checkForUpdates:
             Button {
                 checkForUpdates()
             } label: {
@@ -929,30 +1002,11 @@ struct EditorView: View {
             .buttonStyle(.borderless)
             .hoverTooltip("Check for updates", edge: .above)
             .accessibilityLabel("Check for updates")
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 10) {
-                Button(applyTitle) {
-                    model.apply()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!model.canApply)
-                .frame(maxWidth: .infinity)
-                .welcomeAnchor(.applyButton)
-
-                // Arrange enacts Layouts on live windows and stays independent of
-                // Apply's pending-Assignment gate.
-                Button("Arrange") {
-                    model.arrange()
-                }
-                .disabled(!model.canArrange)
-                .frame(maxWidth: .infinity)
-                .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
-                .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
-                .welcomeAnchor(.arrangeButton)
-            }
-            .frame(width: 260)
+        case .version:
+            Text(version)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Version \(version)")
         }
     }
 }

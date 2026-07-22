@@ -211,6 +211,86 @@ struct AppStateTestRunner {
             )
         }
 
+        // MARK: - Editor chrome layout
+
+        do {
+            check(
+                "footer keeps Apply and Arrange together on the left and update plus version on the right",
+                EditorChromeLayout.footerRegions == [
+                    .actions([.apply, .arrange]),
+                    .flexibleSpace,
+                    .version([.checkForUpdates, .version]),
+                ]
+            )
+            check(
+                "footer action buttons use the required 6 point gap",
+                EditorChromeLayout.footerActionSpacing == 6,
+                "got \(EditorChromeLayout.footerActionSpacing)"
+            )
+            let widths = EditorChromeLayout.footerActionWidths(groupWidth: 260)
+            check(
+                "Apply and Arrange receive equal widths independent of their titles",
+                widths.count == 2 && widths[0] == widths[1],
+                "got \(widths)"
+            )
+        }
+
+        do {
+            let metrics = EditorChromeLayout.PresetControl.allCases.map {
+                EditorChromeLayout.presetMetrics(for: $0)
+            }
+            check(
+                "every Preset-row control has one uniform rendered height",
+                Set(metrics.map(\.height)).count == 1,
+                "got \(metrics.map(\.height))"
+            )
+
+            let management = EditorChromeLayout.presetMetrics(for: .management)
+            check(
+                "Preset management stays compact and hides its menu indicator",
+                management.width == EditorChromeLayout.presetManagementWidth
+                    && management.width < EditorChromeLayout.minimumTextButtonWidth
+                    && management.hidesMenuIndicator
+            )
+        }
+
+        do {
+            let windowWidth: CGFloat = 760
+            let tooltipWidth: CGFloat = 160
+            let padding = EditorChromeLayout.tooltipWindowPadding
+
+            let leftCenter = EditorChromeLayout.tooltipCenterX(
+                controlCenterX: 10,
+                tooltipWidth: tooltipWidth,
+                windowWidth: windowWidth
+            )
+            check(
+                "a tooltip at the left edge shifts inward without changing width",
+                leftCenter - tooltipWidth / 2 == padding,
+                "got center \(leftCenter)"
+            )
+
+            let rightCenter = EditorChromeLayout.tooltipCenterX(
+                controlCenterX: 750,
+                tooltipWidth: tooltipWidth,
+                windowWidth: windowWidth
+            )
+            check(
+                "a tooltip at the right edge shifts inward without changing width",
+                rightCenter + tooltipWidth / 2 == windowWidth - padding,
+                "got center \(rightCenter)"
+            )
+
+            check(
+                "an interior tooltip remains centered over its control",
+                EditorChromeLayout.tooltipCenterX(
+                    controlCenterX: 380,
+                    tooltipWidth: tooltipWidth,
+                    windowWidth: windowWidth
+                ) == 380
+            )
+        }
+
         // MARK: - AppNavigation
 
         do {
