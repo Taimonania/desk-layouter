@@ -32,6 +32,7 @@ let package = Package(
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
                 "DesktopArrangePlan.swift",
+                "ArrangeTransitionCoordinator.swift",
                 "EditorPresenter.swift",
             ]
         ),
@@ -54,6 +55,7 @@ let package = Package(
                 "InstalledApplicationsProvider.swift",
                 "WindowArranger.swift",
                 "DesktopArrangePlan.swift",
+                "ArrangeTransitionCoordinator.swift",
                 "EditorPresenter.swift",
             ]
         ),
@@ -131,6 +133,11 @@ let package = Package(
             name: "DeskLayouterArrangePlanTests",
             dependencies: ["DeskLayouterMacOS"],
             path: "Tests/DeskLayouterArrangePlanTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterTransitionTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterTransitionTests"
         ),
         .executableTarget(
             name: "DeskLayouterActiveDesktopTests",
