@@ -12,10 +12,17 @@ final class AppRootModel: ObservableObject {
     /// is `@Published`, so the root view swaps content in response.
     @Published private(set) var navigation = AppNavigation()
 
+    /// The Welcome guided tour's step and presentation state (issue #72). Seeded at
+    /// init from the persisted `hasSeenWelcome` flag, so a fresh install shows the
+    /// tour automatically over the board; the pure `WelcomeTour` seam owns the
+    /// step/navigation logic while this model persists dismissal.
+    @Published private(set) var welcomeTour: WelcomeTour
+
     private let appState: AppStateStore
 
     init(appState: AppStateStore) {
         self.appState = appState
+        self.welcomeTour = WelcomeTour.onLaunch(hasSeenWelcome: appState.hasSeenWelcome)
     }
 
     /// Whether Sparkle installs updates automatically (`true`) or asks first
@@ -38,5 +45,28 @@ final class AppRootModel: ObservableObject {
     /// Returns to the board (the Settings surface's "Done" control).
     func showBoard() {
         navigation.showBoard()
+    }
+
+    /// Re-opens the Welcome tour from its first step (the header's Help `?`
+    /// button). Available at any time regardless of `hasSeenWelcome`.
+    func openWelcome() {
+        welcomeTour.open()
+    }
+
+    /// Advances the tour to the next step.
+    func welcomeNext() {
+        welcomeTour.next()
+    }
+
+    /// Returns the tour to the previous step.
+    func welcomeBack() {
+        welcomeTour.back()
+    }
+
+    /// Dismisses the tour (Skip or Done) and records that the user has seen it, so
+    /// it does not reappear automatically on later launches.
+    func dismissWelcome() {
+        welcomeTour.dismiss()
+        appState.hasSeenWelcome = true
     }
 }

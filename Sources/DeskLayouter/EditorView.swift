@@ -1,5 +1,6 @@
 import AppKit
 import DeskLayouterCore
+import DeskLayouterMacOS
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -18,6 +19,11 @@ struct EditorView: View {
     /// Swaps the window to the full-window Settings screen (issue #71). Injected so
     /// the board owns none of the navigation state — the root wrapper drives it.
     let openSettings: () -> Void
+
+    /// Re-opens the Welcome guided tour (issue #72). Injected so the header's Help
+    /// (`?`) button routes through the root model that owns the tour state; the
+    /// board itself owns none of it.
+    let openHelp: () -> Void
 
     @State private var dropTargetDesktop: Int?
     @State private var searchFieldWidth: CGFloat = 0
@@ -163,6 +169,14 @@ struct EditorView: View {
             // matching the gearshape Settings button. Each keeps its `.help` tooltip
             // and `.accessibilityLabel` so the meaning survives without a visible
             // title.
+            Button {
+                openHelp()
+            } label: {
+                Label("Help", systemImage: "questionmark.circle")
+            }
+            .labelStyle(.iconOnly)
+            .help("Show the Welcome tour")
+            .accessibilityLabel("Show the Welcome tour")
             Button {
                 openSettings()
             } label: {
@@ -707,6 +721,7 @@ struct EditorView: View {
     private var quickAdd: some View {
         HStack(spacing: 10) {
             searchField
+                .welcomeAnchor(.searchField)
             Toggle("Running only", isOn: $model.showRunningOnly)
                 .toggleStyle(.checkbox)
                 .fixedSize()
@@ -714,6 +729,7 @@ struct EditorView: View {
             Text("Add to")
                 .foregroundStyle(.secondary)
             destinationPicker
+                .welcomeAnchor(.destinationPicker)
         }
     }
 
@@ -853,6 +869,7 @@ struct EditorView: View {
             }
             .keyboardShortcut(.defaultAction)
             .disabled(!model.canApply)
+            .welcomeAnchor(.applyButton)
 
             // Arrange enacts Layouts on live windows. It is separate from Apply
             // (which writes Assignments) and, unlike Apply, is not gated on pending
@@ -863,6 +880,7 @@ struct EditorView: View {
             .disabled(!model.canArrange)
             .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
             .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
+            .welcomeAnchor(.arrangeButton)
 
             if let explanation = model.applyBlockedExplanation {
                 Text(explanation)

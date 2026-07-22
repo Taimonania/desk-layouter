@@ -10,6 +10,7 @@ import Foundation
 public final class AppStateStore {
     private enum Key {
         static let automaticallyInstallUpdates = "automaticallyInstallUpdates"
+        static let hasSeenWelcome = "hasSeenWelcome"
     }
 
     private let defaults: UserDefaults
@@ -27,5 +28,15 @@ public final class AppStateStore {
     public var automaticallyInstallUpdates: Bool {
         get { defaults.bool(forKey: Key.automaticallyInstallUpdates) }
         set { defaults.set(newValue, forKey: Key.automaticallyInstallUpdates) }
+    }
+
+    /// Whether the user has seen the Welcome guided tour (issue #72). Defaults to
+    /// `false` — an absent key reads as `false`, so a fresh install shows the
+    /// Welcome tour automatically on first launch. It is set to `true` when the
+    /// tour is dismissed (Skip or Done) so the tour never reappears on its own; the
+    /// Help (`?`) button re-opens it on demand regardless of this flag.
+    public var hasSeenWelcome: Bool {
+        get { defaults.bool(forKey: Key.hasSeenWelcome) }
+        set { defaults.set(newValue, forKey: Key.hasSeenWelcome) }
     }
 }
