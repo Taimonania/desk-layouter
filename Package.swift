@@ -213,7 +213,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "DeskLayouterUnavailableDisplayTests",
-            dependencies: ["DeskLayouterCore"],
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterUnavailableDisplayTests"
         ),
         .executableTarget(

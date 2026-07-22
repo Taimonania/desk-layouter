@@ -143,6 +143,42 @@ public struct DesktopAddress: Equatable, Hashable, Sendable {
     }
 }
 
+/// A live recovery offer captured for explicit user confirmation. Creation and
+/// confirmation both validate the unique nonzero hardware match, so a topology
+/// change while the prompt is open cannot silently adopt stale evidence.
+public struct DisplayRecoveryRequest: Equatable, Sendable, Identifiable {
+    public let savedDisplay: DisplayIdentity
+    public let candidate: DisplayIdentity
+
+    public var id: String { savedDisplay.colorSyncUUID.lowercased() }
+
+    public init?(
+        savedDisplay: DisplayIdentity,
+        candidate: DisplayIdentity,
+        on topology: DisplayTopologySnapshot
+    ) {
+        guard topology.recoveryCandidate(for: savedDisplay) == candidate else { return nil }
+        self.savedDisplay = savedDisplay
+        self.candidate = candidate
+    }
+
+    public func isValid(on topology: DisplayTopologySnapshot) -> Bool {
+        topology.recoveryCandidate(for: savedDisplay) == candidate
+    }
+
+    /// This method is the explicit-confirmation transition. Merely constructing
+    /// or presenting the request never changes the board.
+    @discardableResult
+    public func confirm(
+        board: inout BoardState,
+        on topology: DisplayTopologySnapshot
+    ) -> Bool {
+        guard isValid(on: topology) else { return false }
+        board.recoverDisplay(savedDisplay, as: candidate)
+        return true
+    }
+}
+
 /// The mutation intent handed to the macOS adapter. Resolvable Assignments are
 /// updates, only explicit removals are deletions, and unresolved Assignments are
 /// preserved exactly as macOS last knew them.

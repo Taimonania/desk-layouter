@@ -1,4 +1,5 @@
 import DeskLayouterCore
+import DeskLayouterMacOS
 import Foundation
 
 private let builtIn = DisplayIdentity(
@@ -154,7 +155,28 @@ struct UnavailableDisplayTestRunner {
             check("unique nonzero hardware identity offers recovery", suggestion == replacement)
             check("an exact connected identity never offers recovery", recoveryTopology.recoveryCandidate(for: replacement) == nil)
             check("recovery is not silently accepted", board.configuration.managedApplication(for: "com.example.offline")?.display == external)
-            board.recoverDisplay(external, as: replacement)
+            let request = DisplayRecoveryRequest(
+                savedDisplay: external,
+                candidate: replacement,
+                on: recoveryTopology
+            )
+            check("unique match creates an explicit recovery request", request != nil)
+            var staleBoard = board
+            let staleConfirmed = request?.confirm(
+                board: &staleBoard,
+                on: topology([
+                    section(replacement, main: true, desktops: ["E1"]),
+                    section(DisplayIdentity(
+                        colorSyncUUID: "EXTERNAL-DUPLICATE",
+                        lastKnownName: "Duplicate",
+                        vendorID: 2,
+                        modelID: 20,
+                        serialNumber: 200
+                    ), desktops: ["D1"]),
+                ])
+            )
+            check("topology ambiguity invalidates an open recovery request", staleConfirmed == false && staleBoard == board)
+            check("explicit recovery confirmation succeeds", request?.confirm(board: &board, on: recoveryTopology) == true)
             let recovered = board.configuration.managedApplication(for: "com.example.offline")
             check("confirmed recovery replaces saved identity", recovered?.display == replacement)
             check("confirmed recovery preserves Desktop and Layout", recovered?.desktopNumber == 2 && recovered?.layout == layout)
@@ -223,6 +245,28 @@ struct UnavailableDisplayTestRunner {
                 message == "Skipped Layouts on unavailable Displays: Studio Display and Travel Display.",
                 "got \(message)"
             )
+
+            let connectedLayout = app(
+                "com.example.connected-layout",
+                display: builtIn,
+                desktop: 1,
+                layout: layout
+            )
+            let offlineLayout = app(
+                "com.example.offline-layout",
+                display: external,
+                desktop: 1,
+                layout: layout
+            )
+            let scoped = ArrangeEngine.applications(
+                [connectedLayout, offlineLayout],
+                assignedTo: DesktopAddress(display: builtIn, desktopNumber: 1),
+                in: connected
+            )
+            check(
+                "Arrange continues with connected Layouts and skips unavailable Display Layouts",
+                scoped.map(\.bundleIdentifier) == [connectedLayout.bundleIdentifier]
+            )
         }
 
         // Removing an unavailable Assignment produces only its explicit deletion;
@@ -240,6 +284,32 @@ struct UnavailableDisplayTestRunner {
             )
             check("offline explicit removal is a deletion", plan.deletions == ["com.example.offline"])
             check("offline explicit removal deletes only owned binding", result == ["com.example.unmanaged": "U1"])
+        }
+
+        do {
+            let semantic = AssignmentApplyPlan(
+                updates: ["com.example.update": "B2"],
+                deletions: ["com.example.removed"],
+                preservations: ["com.example.offline"]
+            )
+            let persistent = PersistentBindingReconciler.applyPlan(
+                existing: [
+                    "com.example.update": "OLD",
+                    "com.example.removed": "R1",
+                    "com.example.offline": "E1",
+                    "com.example.unmanaged": "U1",
+                ],
+                assignmentPlan: semantic
+            )
+            check("store-aware Apply plan distinguishes updates", persistent.updates == semantic.updates)
+            check("store-aware Apply plan distinguishes explicit deletions", persistent.explicitDeletions == semantic.deletions)
+            check("store-aware Apply plan distinguishes unavailable preservation", persistent.unavailableDisplayPreservations == ["com.example.offline": "E1"])
+            check("store-aware Apply plan distinguishes unmanaged preservation", persistent.unmanagedPreservations == ["com.example.unmanaged": "U1"])
+            check("store-aware Apply plan computes complete safe bindings", persistent.completeBindings == [
+                "com.example.update": "B2",
+                "com.example.offline": "E1",
+                "com.example.unmanaged": "U1",
+            ])
         }
 
         do {
@@ -292,7 +362,12 @@ struct UnavailableDisplayTestRunner {
                 topology([section(builtIn, members: [builtIn, external], main: true, desktops: ["M1", "M2"])]),
                 topology([section(external, main: true, desktops: ["E1", "E2"])]),
             ]
-            for shape in shapes { _ = board.projection(on: shape, installedBundleIdentifiers: []) }
+            let projections = shapes.map {
+                board.projection(on: $0, installedBundleIdentifiers: [])
+            }
+            check("disconnect refresh moves the edited Assignment to unavailable Displays", projections[0].unavailableDisplays.count == 1)
+            check("mirror refresh resolves the saved member identity", projections[1].unavailableDisplays.isEmpty)
+            check("lid/Main refresh resolves the external identity normally", projections[2].unavailableDisplays.isEmpty)
             check("topology refresh preserves pending edit", board.configuration.managedApplication(for: "com.example.pending")?.desktopNumber == 2)
             check("topology refresh preserves Preset association", board.selectedPresetID == presetID)
         }

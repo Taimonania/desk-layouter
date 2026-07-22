@@ -26,6 +26,7 @@ state_base="${state_base%/}"
 state_root="$state_base/desk-layouter-unavailable-display-state"
 original_bindings="$state_root/original-app-bindings.json"
 configuration_json="$state_root/configuration.json"
+seed_configuration_json="$state_root/seed-configuration.json"
 snapshot_json="$state_root/topology-$mode.json"
 plan_json="$state_root/plan-$mode.json"
 session_helper="$state_root/session-helper"
@@ -148,6 +149,17 @@ verify_binding() {
     }
 }
 
+verify_binding_absent() {
+    local key="$1"
+    current="$(/usr/bin/defaults read com.apple.spaces app-bindings 2>/dev/null \
+        | /usr/bin/plutil -convert json -o - - \
+        | /usr/bin/jq -r --arg key "$key" '.[$key] // empty')"
+    [[ -z "$current" ]] || {
+        print -u2 "FAIL: $key unexpectedly existed with $current"
+        return 1
+    }
+}
+
 if [[ "$mode" == arm ]]; then
     built_count="$(/usr/bin/jq '[.sections[] | select(.isBuiltIn == true and .isMirrored == false)] | length' "$snapshot_json")"
     external_count="$(/usr/bin/jq '[.sections[] | select(.isBuiltIn == false and .isMirrored == false)] | length' "$snapshot_json")"
@@ -180,17 +192,24 @@ if [[ "$mode" == arm ]]; then
             pendingRemovals: []
         }' > "$configuration_json"
 
-    swift run DeskLayouterMultiDisplaySystemTests apply "$configuration_json"
+    # Seed only the soon-to-be-unavailable external Assignment. The built-in
+    # Assignment remains genuinely new until the disconnected phase, proving a
+    # connected edit can be Applied alongside unavailable preservation.
+    /usr/bin/jq --arg external "$external_bundle" '{
+        managedApplications: [.managedApplications[] | select(.bundleIdentifier == $external)],
+        pendingRemovals: []
+    }' "$configuration_json" > "$seed_configuration_json"
+    swift run DeskLayouterMultiDisplaySystemTests apply "$seed_configuration_json"
     built_binding="$(/usr/bin/jq -r '.desktopUUIDs[0]' "$state_root/built-section.json")"
     external_binding="$(/usr/bin/jq -r '.desktopUUIDs[0]' "$state_root/external-section.json")"
     print -r -- "$built_binding" > "$state_root/built-binding"
     print -r -- "$external_binding" > "$state_root/external-binding"
-    verify_binding "$built_bundle" "$built_binding"
+    verify_binding_absent "$built_bundle"
     verify_binding "$external_bundle" "$external_binding"
     verify_unmanaged
     print -r -- "armed" > "$phase_file"
     phase_complete=1
-    print "PASS: disposable built-in and external bindings seeded without changing unmanaged bindings"
+    print "PASS: disposable external binding seeded; connected built-in addition remains pending for the disconnect phase"
     print "Disconnect the external Display, then run: make unavailable-display-external-disconnected"
     exit 0
 fi
@@ -214,11 +233,12 @@ case "$mode" in
             '(.preservations == [$offline]) and (.updates | has($connected)) and (.invalidDesktopAssignments == []) and .canMutate' \
             "$plan_json" >/dev/null || { print -u2 "FAIL: disconnected external was not preserved alongside the connected update"; exit 1; }
         swift run DeskLayouterMultiDisplaySystemTests apply "$configuration_json"
+        verify_binding "$built_bundle" "$built_binding"
         verify_binding "$external_bundle" "$external_binding"
         verify_unmanaged
         print -r -- "external-disconnected" > "$phase_file"
         phase_complete=1
-        print "PASS: unrelated built-in Apply preserved the disconnected external binding and every unmanaged binding"
+        print "PASS: genuinely new built-in Assignment Applied while preserving the disconnected external binding and every unmanaged binding"
         print "Reconnect the exact external Display, then run: make unavailable-display-external-reconnected"
         ;;
     external-reconnected)

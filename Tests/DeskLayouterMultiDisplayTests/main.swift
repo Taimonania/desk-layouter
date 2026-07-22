@@ -305,6 +305,21 @@ struct MultiDisplayTestRunner {
             check("Main-role topology race aborts", (raceError as? SpacesAdapterError) == .displayTopologyChanged)
             check("topology race performs no write/delete/Dock restart", runner.writes == writesBeforeRace && runner.deletes == deletesBeforeRace && runner.dockRestarts == restartsBeforeRace)
 
+            inventory.displays = [first]
+            var hotPlugError: Error?
+            do {
+                try adapter.apply(
+                    plan: AssignmentApplyPlan(
+                        updates: ["com.example.changed": "B2"],
+                        deletions: [],
+                        preservations: []
+                    ),
+                    expectedTopology: expected
+                )
+            } catch { hotPlugError = error }
+            check("active-Display removal race aborts", (hotPlugError as? SpacesAdapterError) == .displayTopologyChanged)
+            check("active-Display removal performs no write/delete/Dock restart", runner.writes == writesBeforeRace && runner.deletes == deletesBeforeRace && runner.dockRestarts == restartsBeforeRace)
+
             let pendingApp = ManagedApplication(
                 bundleIdentifier: "com.example.pending.race",
                 displayName: "Pending race",
@@ -322,10 +337,10 @@ struct MultiDisplayTestRunner {
             do {
                 try adapter.apply(plan: pendingPlan, expectedTopology: expected)
             } catch {
-                // Expected: inventory still has the changed Main role above.
+                // Expected: the external Display is still removed above.
             }
             check(
-                "hot-plug/Main race keeps working edits pending",
+                "hot-plug race keeps working edits pending",
                 pendingBoard.pendingChanges(on: expected) == [pendingApp.bundleIdentifier]
             )
 

@@ -41,15 +41,6 @@ struct PendingDisplayMigration: Identifiable, Equatable {
     var id: String { displays.map(\.colorSyncUUID).joined(separator: "|") }
 }
 
-/// Explicit confirmation required before adopting a recovery identity. The
-/// suggestion is live-topology evidence only; no state changes until confirmed.
-struct PendingDisplayRecovery: Identifiable, Equatable {
-    let savedDisplay: DisplayIdentity
-    let candidate: DisplayIdentity
-
-    var id: String { savedDisplay.colorSyncUUID.lowercased() }
-}
-
 private struct DisplayArrangePass {
     let destination: DesktopAddress
     let applications: [ManagedApplication]
@@ -82,7 +73,7 @@ final class EditorModel: ObservableObject {
     @Published var pendingPresetDeletion: PendingPresetDeletion?
     @Published var pendingPresetRevert: PendingPresetRevert?
     @Published private(set) var pendingDisplayMigration: PendingDisplayMigration?
-    @Published private(set) var pendingDisplayRecovery: PendingDisplayRecovery?
+    @Published private(set) var pendingDisplayRecovery: DisplayRecoveryRequest?
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
@@ -1182,14 +1173,17 @@ final class EditorModel: ObservableObject {
         savedDisplay: DisplayIdentity,
         candidate: DisplayIdentity
     ) {
-        guard unavailableDisplaySections.contains(where: {
+        guard let topology = latestDisplayTopology,
+              unavailableDisplaySections.contains(where: {
             $0.display.identifiesSameDisplay(as: savedDisplay)
                 && $0.recoveryCandidate == candidate
-        }) else { return }
-        pendingDisplayRecovery = PendingDisplayRecovery(
+        }),
+              let request = DisplayRecoveryRequest(
             savedDisplay: savedDisplay,
-            candidate: candidate
-        )
+            candidate: candidate,
+            on: topology
+        ) else { return }
+        pendingDisplayRecovery = request
     }
 
     func cancelDisplayRecovery() {
@@ -1202,8 +1196,7 @@ final class EditorModel: ObservableObject {
     func confirmDisplayRecovery() {
         guard let pending = pendingDisplayRecovery,
               let topology = latestDisplayTopology,
-              topology.section(containing: pending.savedDisplay) == nil,
-              topology.recoveryCandidate(for: pending.savedDisplay) == pending.candidate
+              pending.isValid(on: topology)
         else {
             pendingDisplayRecovery = nil
             return
@@ -1212,7 +1205,7 @@ final class EditorModel: ObservableObject {
         mutateAndPersist(
             info: "Recovered Assignments to \(pending.candidate.lastKnownName). Click Apply to enforce them."
         ) {
-            $0.recoverDisplay(pending.savedDisplay, as: pending.candidate)
+            _ = pending.confirm(board: &$0, on: topology)
         }
     }
 

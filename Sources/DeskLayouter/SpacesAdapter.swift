@@ -114,11 +114,7 @@ public extension SpacesAdapter {
     }
 
     func apply(plan: AssignmentApplyPlan, expectedTopology: DisplayTopologySnapshot) throws {
-        guard plan.invalidDesktopAssignments.isEmpty else {
-            throw SpacesAdapterError.invalidDesktopAssignments(
-                bundleIdentifiers: plan.invalidDesktopAssignments.sorted()
-            )
-        }
+        try validateApplyPlan(plan)
         try apply(
             managedBindings: plan.updates,
             managedBundleIdentifiers: Set(plan.updates.keys).union(plan.deletions),
@@ -333,11 +329,7 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         plan: AssignmentApplyPlan,
         expectedTopology: DisplayTopologySnapshot
     ) throws {
-        guard plan.invalidDesktopAssignments.isEmpty else {
-            throw SpacesAdapterError.invalidDesktopAssignments(
-                bundleIdentifiers: plan.invalidDesktopAssignments.sorted()
-            )
-        }
+        try validateApplyPlan(plan)
         try sessionBindingUpdater.preflight()
 
         let updates = Dictionary(
@@ -345,11 +337,15 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             uniquingKeysWith: { _, latest in latest }
         )
         let deletions = Set(plan.deletions.map { $0.lowercased() })
+        let preservations = Set(plan.preservations.map { $0.lowercased() })
         let existing = try readAppBindings()
-        let complete = PersistentBindingReconciler.completeBindings(
+        let persistentPlan = PersistentBindingReconciler.applyPlan(
             existing: existing,
-            updates: updates,
-            deletions: deletions
+            assignmentPlan: AssignmentApplyPlan(
+                updates: updates,
+                deletions: deletions,
+                preservations: preservations
+            )
         )
 
         guard expectedTopology.displaysHaveSeparateSpaces else {
@@ -358,7 +354,7 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         guard try currentDisplayTopology() == expectedTopology else {
             throw SpacesAdapterError.displayTopologyChanged
         }
-        try writeAndActivate(completeBindings: complete)
+        try writeAndActivate(completeBindings: persistentPlan.completeBindings)
     }
 
     private func writeAndActivate(completeBindings: [String: String]) throws {
@@ -416,6 +412,16 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             displayKey: displayKey
         )
         return DesktopSnapshot(display: identity, orderedDesktopUUIDs: orderedDesktopUUIDs)
+    }
+}
+
+/// Shared fail-closed validation for both the protocol compatibility path and
+/// the production topology-aware adapter.
+private func validateApplyPlan(_ plan: AssignmentApplyPlan) throws {
+    guard plan.invalidDesktopAssignments.isEmpty else {
+        throw SpacesAdapterError.invalidDesktopAssignments(
+            bundleIdentifiers: plan.invalidDesktopAssignments.sorted()
+        )
     }
 }
 
