@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut and publish a new signed, notarized Desk Layouter release with a Sparkle auto-update feed. Use when the user wants to release, ship, publish a new version, cut a release, or bump the Desk Layouter version.
+description: Cut and publish a new signed, notarized Desk Layouter release with a Sparkle auto-update feed. Use when the user wants to cut, ship, or publish a new Desk Layouter version.
 ---
 
 # Releasing Desk Layouter
@@ -47,7 +47,8 @@ git log --oneline "$last"..HEAD
 GH_HOST=github.com gh pr list --repo Taimonania/desk-layouter --state merged \
   --search "merged:>$(git log -1 --format=%aI "$last")" --json number,title
 ```
-Keep it honest and concise — one line per real change.
+One line per real change; honest and concise. Done when `RELEASE_NOTES.md` has both
+`## Highlights` and `## Notes` and every change since `$last` is represented in one of them.
 
 ### 4. Dry run (no publish)
 ```sh
@@ -56,7 +57,8 @@ make release
 Builds (universal) → signs inside-out → notarizes → staples → generates the signed
 appcast, then runs local verification. Emits the `.dmg`, `.zip`, and `appcast.xml`
 under `.build/release/` but publishes nothing. Notarization needs the network and takes
-a few minutes; it must report `status: Accepted`. Review the output before publishing.
+a few minutes. Done when notarization reports `status: Accepted` and the `.dmg`, `.zip`,
+and `appcast.xml` all exist under `.build/release/`.
 
 ### 5. Publish (irreversible — requires the user's authorization)
 ```sh
