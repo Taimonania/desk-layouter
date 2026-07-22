@@ -100,6 +100,26 @@ struct EditorView: View {
             renamePresetSheet
         }
         .confirmationDialog(
+            displayRecoveryTitle,
+            isPresented: Binding(
+                get: { model.pendingDisplayRecovery != nil },
+                set: { presenting in if !presenting { model.cancelDisplayRecovery() } }
+            ),
+            titleVisibility: .visible,
+            presenting: model.pendingDisplayRecovery
+        ) { pending in
+            Button("Use \(pending.candidate.lastKnownName)") {
+                model.confirmDisplayRecovery()
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) {
+                model.cancelDisplayRecovery()
+            }
+            .keyboardShortcut(.cancelAction)
+        } message: { pending in
+            Text("The connected Display has the same nonzero hardware identity as \(pending.savedDisplay.lastKnownName). Confirm to replace the saved identity. Nothing will be Applied or Arranged.")
+        }
+        .confirmationDialog(
             presetRevertTitle,
             isPresented: Binding(
                 get: { model.pendingPresetRevert != nil },
@@ -481,7 +501,7 @@ struct EditorView: View {
 
     @ViewBuilder
     private func board(availableWidth: CGFloat) -> some View {
-        if model.displaySections.isEmpty {
+        if model.displaySections.isEmpty && model.unavailableDisplaySections.isEmpty {
             Text("No active Displays and Desktops were found.")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 160)
@@ -490,8 +510,59 @@ struct EditorView: View {
                 ForEach(model.displaySections) { section in
                     displaySection(section, availableWidth: availableWidth)
                 }
+                if !model.unavailableDisplaySections.isEmpty {
+                    unavailableDisplaysRegion(model.unavailableDisplaySections)
+                }
             }
         }
+    }
+
+    private func unavailableDisplaysRegion(
+        _ sections: [UnavailableDisplaySection]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "display.trianglebadge.exclamationmark")
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+                Text("Unavailable Displays").font(.headline)
+            }
+            Text("These physical Displays are disconnected or cannot be identified uniquely. Their Assignments and Layouts are preserved. Reassign an app to an available Display, reconnect the exact Display, or confirm a recovery match.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(sections) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(section.displayName).font(.headline)
+                        Spacer()
+                        Text("\(section.assignmentCount)")
+                            .font(.caption.monospacedDigit())
+                            .accessibilityLabel("\(section.assignmentCount) Assignments")
+                    }
+                    if let candidate = section.recoveryCandidate {
+                        Button("Recover as \(candidate.lastKnownName)…") {
+                            model.requestDisplayRecovery(
+                                savedDisplay: section.display,
+                                candidate: candidate
+                            )
+                        }
+                        .help("Confirm this unique nonzero hardware-identity match")
+                    }
+                    ForEach(section.cards) { card in
+                        appCard(card)
+                    }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.06)))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.orange.opacity(0.4)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Unavailable Displays. Assignments and Layouts are preserved.")
     }
 
     private func displaySection(
@@ -779,7 +850,8 @@ struct EditorView: View {
     private func currentCard(for card: BoardCard) -> BoardCard? {
         let available = model.displaySections.flatMap(\.availableColumns).flatMap(\.cards)
         let unavailable = model.displaySections.flatMap(\.unavailableDesktops).flatMap(\.cards)
-        return (available + unavailable)
+        let unavailableDisplays = model.unavailableDisplaySections.flatMap(\.cards)
+        return (available + unavailable + unavailableDisplays)
             .first { $0.bundleIdentifier == card.bundleIdentifier }
     }
 
@@ -1011,6 +1083,11 @@ struct EditorView: View {
 
     private var applyTitle: String {
         model.pendingChangeCount > 0 ? "Apply (\(model.pendingChangeCount))" : "Apply"
+    }
+
+    private var displayRecoveryTitle: String {
+        guard let pending = model.pendingDisplayRecovery else { return "Recover Display?" }
+        return "Recover \(pending.savedDisplay.lastKnownName)?"
     }
 
     private var statusArea: some View {

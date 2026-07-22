@@ -114,6 +114,7 @@ public extension SpacesAdapter {
     }
 
     func apply(plan: AssignmentApplyPlan, expectedTopology: DisplayTopologySnapshot) throws {
+        try validateApplyPlan(plan)
         try apply(
             managedBindings: plan.updates,
             managedBundleIdentifiers: Set(plan.updates.keys).union(plan.deletions),
@@ -328,6 +329,7 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         plan: AssignmentApplyPlan,
         expectedTopology: DisplayTopologySnapshot
     ) throws {
+        try validateApplyPlan(plan)
         try sessionBindingUpdater.preflight()
 
         let updates = Dictionary(
@@ -335,11 +337,15 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             uniquingKeysWith: { _, latest in latest }
         )
         let deletions = Set(plan.deletions.map { $0.lowercased() })
+        let preservations = Set(plan.preservations.map { $0.lowercased() })
         let existing = try readAppBindings()
-        let complete = PersistentBindingReconciler.completeBindings(
+        let persistentPlan = PersistentBindingReconciler.applyPlan(
             existing: existing,
-            updates: updates,
-            deletions: deletions
+            assignmentPlan: AssignmentApplyPlan(
+                updates: updates,
+                deletions: deletions,
+                preservations: preservations
+            )
         )
 
         guard expectedTopology.displaysHaveSeparateSpaces else {
@@ -348,7 +354,7 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         guard try currentDisplayTopology() == expectedTopology else {
             throw SpacesAdapterError.displayTopologyChanged
         }
-        try writeAndActivate(completeBindings: complete)
+        try writeAndActivate(completeBindings: persistentPlan.completeBindings)
     }
 
     private func writeAndActivate(completeBindings: [String: String]) throws {
@@ -409,11 +415,22 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
     }
 }
 
+/// Shared fail-closed validation for both the protocol compatibility path and
+/// the production topology-aware adapter.
+private func validateApplyPlan(_ plan: AssignmentApplyPlan) throws {
+    guard plan.invalidDesktopAssignments.isEmpty else {
+        throw SpacesAdapterError.invalidDesktopAssignments(
+            bundleIdentifiers: plan.invalidDesktopAssignments.sorted()
+        )
+    }
+}
+
 public enum SpacesAdapterError: LocalizedError, Equatable {
     case commandFailed(executable: String, status: Int32, message: String)
     case activeDesktopUnavailable
     case displayEnumerationFailed
     case displayTopologyChanged
+    case invalidDesktopAssignments(bundleIdentifiers: [String])
     case multipleDisplaysUnsupported
     case noActiveDisplay
     case noDesktopsFound
@@ -432,6 +449,8 @@ public enum SpacesAdapterError: LocalizedError, Equatable {
             "The active displays could not be read."
         case .displayTopologyChanged:
             "The displays changed while applying. Nothing was written — review the board and try again."
+        case let .invalidDesktopAssignments(bundleIdentifiers):
+            "Assignments target unavailable Desktops: \(bundleIdentifiers.joined(separator: ", ")). Move or remove them before Applying."
         case .multipleDisplaysUnsupported:
             "Multiple displays are not yet supported. Use a single active display."
         case .noActiveDisplay:

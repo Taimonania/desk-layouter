@@ -1,3 +1,20 @@
+/// Store-aware Apply classification. Unlike the semantic Assignment plan, this
+/// is built after reading macOS and can therefore name unmanaged bindings
+/// explicitly rather than treating their retention as an implicit merge detail.
+public struct PersistentBindingApplyPlan: Equatable, Sendable {
+    public let updates: [String: String]
+    public let explicitDeletions: Set<String>
+    public let unavailableDisplayPreservations: [String: String]
+    public let unmanagedPreservations: [String: String]
+
+    public var completeBindings: [String: String] {
+        var complete = unmanagedPreservations
+        for (key, value) in unavailableDisplayPreservations { complete[key] = value }
+        for (key, value) in updates { complete[key] = value }
+        return complete
+    }
+}
+
 /// Computes the complete post-change persistent `app-bindings` dictionary that
 /// Apply must write, without touching the real store, Dock, or WindowServer.
 ///
@@ -13,6 +30,30 @@
 /// its own; it is deliberately pure dictionary arithmetic so it can be
 /// exhaustively unit-tested with fabricated dictionaries.
 public enum PersistentBindingReconciler {
+    /// Classifies every existing binding against the semantic Assignment plan.
+    /// Inputs use the normalized key form macOS stores. Explicit deletions win
+    /// over preservation if a malformed caller overlaps categories; updates win
+    /// over old stored values.
+    public static func applyPlan(
+        existing: [String: String],
+        assignmentPlan: AssignmentApplyPlan
+    ) -> PersistentBindingApplyPlan {
+        let deletionKeys = assignmentPlan.deletions
+        let updateKeys = Set(assignmentPlan.updates.keys)
+        let unavailableKeys = assignmentPlan.preservations
+            .subtracting(deletionKeys)
+            .subtracting(updateKeys)
+        let unavailable = existing.filter { unavailableKeys.contains($0.key) }
+        let managedKeys = deletionKeys.union(updateKeys).union(unavailableKeys)
+        let unmanaged = existing.filter { !managedKeys.contains($0.key) }
+        return PersistentBindingApplyPlan(
+            updates: assignmentPlan.updates,
+            explicitDeletions: deletionKeys,
+            unavailableDisplayPreservations: unavailable,
+            unmanagedPreservations: unmanaged
+        )
+    }
+
     /// Multi-Display reconciliation: preserve every existing key except an
     /// explicit deletion, then overlay every resolvable update.
     public static func completeBindings(

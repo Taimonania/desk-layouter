@@ -201,9 +201,9 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// many columns as the machine actually has — whether that is one, three, or
     /// more. With no Desktops the board has no columns rather than trapping. A
     /// card whose Desktop number falls outside the current range (its Desktop was
-    /// removed after the Assignment was saved) is left out of every column; the
-    /// adapter deletes such stale keys on the next Apply, matching the planner's
-    /// skip-out-of-range behavior.
+    /// removed after the Assignment was saved) is left out of this legacy column
+    /// projection. The availability-aware projection surfaces it explicitly and
+    /// topology-aware Apply blocks until the user moves or removes it.
     public func columns(desktopCount: Int) -> [DesktopColumn] {
         guard desktopCount > 0 else { return [] }
         var cardsByDesktop: [Int: [BoardCard]] = [:]
@@ -280,10 +280,9 @@ public struct BoardState: Codable, Equatable, Sendable {
             }
             if let topology,
                let display = destination.display,
-               topology.concreteDesktopUUID(
-                    display: display,
-                    desktopNumber: destination.desktopNumber
-               ) != applied.concreteDesktopUUID {
+               let section = topology.section(containing: display),
+               section.concreteDesktopUUID(at: destination.desktopNumber)
+                    != applied.concreteDesktopUUID {
                 changed.insert(bundleIdentifier)
             }
         }
@@ -368,6 +367,33 @@ public struct BoardState: Codable, Equatable, Sendable {
                 desktopNumber: desktopNumber,
                 layout: application.layout
             )
+        )
+    }
+
+    /// Replaces one unavailable saved physical identity after the user confirms
+    /// a unique hardware recovery suggestion. Every working Assignment for that
+    /// Display moves together; Desktop numbers, Layouts, ordering, applied
+    /// baseline, and Preset association stay untouched. Consequently this is a
+    /// normal pending working-board edit and never Applies or Arranges by itself.
+    public mutating func recoverDisplay(
+        _ savedDisplay: DisplayIdentity,
+        as replacement: DisplayIdentity
+    ) {
+        let recovered = configuration.managedApplications.map { application in
+            guard application.display?.identifiesSameDisplay(as: savedDisplay) == true else {
+                return application
+            }
+            return ManagedApplication(
+                bundleIdentifier: application.bundleIdentifier,
+                displayName: application.displayName,
+                display: replacement,
+                desktopNumber: application.desktopNumber,
+                layout: application.layout
+            )
+        }
+        configuration = DeskLayouterConfiguration(
+            managedApplications: recovered,
+            pendingRemovals: configuration.pendingRemovals
         )
     }
 
