@@ -35,6 +35,10 @@ cp "$binary_directory/DeskLayouter" "$contents_directory/MacOS/DeskLayouter"
 cp "$project_directory/App/Info.plist" "$contents_directory/Info.plist"
 plutil -lint "$contents_directory/Info.plist"
 
+# App icon (issue #74). Info.plist's CFBundleIconFile ("AppIcon") resolves to
+# Contents/Resources/AppIcon.icns; Finder and the Dock read it from there.
+cp "$project_directory/App/AppIcon.icns" "$contents_directory/Resources/AppIcon.icns"
+
 # Embed Sparkle.framework. The executable links it as @rpath/Sparkle.framework,
 # but SwiftPM only leaves it in the build directory, so a relocatable .app must
 # carry its own copy under Contents/Frameworks and gain an rpath that points
