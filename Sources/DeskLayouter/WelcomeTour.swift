@@ -24,9 +24,11 @@ public enum WelcomeSpotlightTarget: Hashable, Sendable {
 /// (Named a "tour" rather than a "screen"/"surface" because it floats *over* the
 /// board rather than replacing it the way the Settings surface does.)
 public struct WelcomeTour: Equatable, Sendable {
-    /// The tour's three steps, in order. The raw value is the zero-based step
+    /// The tour's four steps, in order. The raw value is the zero-based step
     /// index, which also drives the progress dots.
     public enum Step: Int, CaseIterable, Sendable {
+        /// Introduces the Assignment / Layout workflow before spotlighting controls.
+        case intro
         /// Spotlight the search field + the "Add to" Desktop picker.
         case addApps
         /// Spotlight the Apply button (macOS then enforces Assignments).
@@ -35,44 +37,61 @@ public struct WelcomeTour: Equatable, Sendable {
         /// on the live Arrange button.
         case goFurther
 
-        /// The callout card's heading for this step.
-        public var title: String {
+        /// Keeps every page's content and presentation metadata together, so a
+        /// new page adds one exhaustive case rather than parallel switches.
+        private var descriptor: (
+            title: String,
+            message: String,
+            spotlightTargets: [WelcomeSpotlightTarget],
+            showsSampleCard: Bool
+        ) {
             switch self {
-            case .addApps: return "Add apps"
-            case .apply: return "Apply your setup"
-            case .goFurther: return "Go further with Layouts"
+            case .intro:
+                return (
+                    "Welcome to Desk Layouter",
+                    "Choose which macOS Desktop each app belongs to and, optionally, where its windows should sit. Design your setup first, then Apply assignments and Arrange windows.",
+                    [],
+                    false
+                )
+            case .addApps:
+                return (
+                    "Add apps",
+                    "Search for an application, then choose the Desktop to add it to. Editing the board changes only Desk Layouter — nothing moves yet.",
+                    [.searchField, .destinationPicker],
+                    false
+                )
+            case .apply:
+                return (
+                    "Apply your setup",
+                    "Apply writes your Assignments into macOS. From then on each app opens on the Desktop you picked, at launch and at login.",
+                    [.applyButton],
+                    false
+                )
+            case .goFurther:
+                return (
+                    "Go further with Layouts",
+                    "Give an app a Layout to say where its window sits on its Desktop, then use Arrange to position the live windows.",
+                    [.arrangeButton],
+                    true
+                )
             }
         }
+
+        /// The callout card's heading for this step.
+        public var title: String { descriptor.title }
 
         /// The callout card's body copy for this step.
-        public var message: String {
-            switch self {
-            case .addApps:
-                return "Search for an application, then choose the Desktop to add it to. Editing the board changes only Desk Layouter — nothing moves yet."
-            case .apply:
-                return "Apply writes your Assignments into macOS. From then on each app opens on the Desktop you picked, at launch and at login."
-            case .goFurther:
-                return "Give an app a Layout to say where its window sits on its Desktop, then use Arrange to position the live windows."
-            }
-        }
+        public var message: String { descriptor.message }
 
-        /// The live controls this step dims around. Step 3 spotlights the live
+        /// The live controls this step dims around. Step 4 spotlights the live
         /// Arrange button; its recreated app card is drawn inside the callout
         /// itself (the board is empty on first run) rather than anchored here.
-        public var spotlightTargets: [WelcomeSpotlightTarget] {
-            switch self {
-            case .addApps: return [.searchField, .destinationPicker]
-            case .apply: return [.applyButton]
-            case .goFurther: return [.arrangeButton]
-            }
-        }
+        public var spotlightTargets: [WelcomeSpotlightTarget] { descriptor.spotlightTargets }
 
         /// Whether this step shows the recreated app card in its callout (true only
         /// for the final "Go further" step, since the board has no live card on
         /// first run to anchor to).
-        public var showsSampleCard: Bool {
-            self == .goFurther
-        }
+        public var showsSampleCard: Bool { descriptor.showsSampleCard }
     }
 
     /// Whether the tour is currently shown over the board.
@@ -81,7 +100,7 @@ public struct WelcomeTour: Equatable, Sendable {
     /// The step currently shown.
     public private(set) var currentStep: Step
 
-    public init(isPresented: Bool = false, currentStep: Step = .addApps) {
+    public init(isPresented: Bool = false, currentStep: Step = .intro) {
         self.isPresented = isPresented
         self.currentStep = currentStep
     }
@@ -91,7 +110,7 @@ public struct WelcomeTour: Equatable, Sendable {
     /// stays dismissed. This is the first-run gate — a fresh install always shows
     /// Welcome and never the What's-New screen (issue #72).
     public static func onLaunch(hasSeenWelcome: Bool) -> WelcomeTour {
-        WelcomeTour(isPresented: !hasSeenWelcome, currentStep: .addApps)
+        WelcomeTour(isPresented: !hasSeenWelcome, currentStep: .intro)
     }
 
     /// The current step's zero-based index, for the progress dots.
@@ -111,7 +130,7 @@ public struct WelcomeTour: Equatable, Sendable {
     /// re-open the tour on demand at any time.
     public mutating func open() {
         isPresented = true
-        currentStep = .addApps
+        currentStep = .intro
     }
 
     /// Advances to the next step. A no-op on the last step (the last step's primary

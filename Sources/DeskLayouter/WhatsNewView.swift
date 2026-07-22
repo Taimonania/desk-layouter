@@ -53,7 +53,7 @@ struct WhatsNewView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(minWidth: AppWindowMetrics.minWidth, minHeight: AppWindowMetrics.minHeight)
+        .frame(minWidth: AppWindowConfiguration.minWidth, minHeight: AppWindowConfiguration.minHeight)
     }
 
     /// One version's highlights. The per-version heading (version + date) is shown

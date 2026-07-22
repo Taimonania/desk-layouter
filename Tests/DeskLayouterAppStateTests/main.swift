@@ -120,6 +120,97 @@ struct AppStateTestRunner {
             )
         }
 
+        // MARK: - Support report
+
+        do {
+            let url = SupportReport.githubIssueURL(
+                appVersion: "1.2.3",
+                macOSVersion: "macOS 15.5 (24F74)"
+            )
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            check(
+                "Report a Problem opens the repository's new-issue path",
+                components?.scheme == "https"
+                    && components?.host == "github.com"
+                    && components?.path == "/Taimonania/desk-layouter/issues/new",
+                "got \(url.absoluteString)"
+            )
+            check(
+                "the support issue is prefilled with version and behavior prompts",
+                query["body"]?.contains("Desk Layouter version\n1.2.3") == true
+                    && query["body"]?.contains("macOS version\nmacOS 15.5 (24F74)") == true
+                    && query["body"]?.contains("Expected behavior") == true
+                    && query["body"]?.contains("Actual behavior") == true,
+                "got \(query["body"] ?? "<missing body>")"
+            )
+        }
+
+        // MARK: - Shared editor status
+
+        do {
+            let status = EditorStatusPresentation.resolve(
+                feedback: .success("Applied 2 Assignments."),
+                pendingChangeCount: 3,
+                applyBlockedExplanation: "Apply is disabled.",
+                desktopCount: 0
+            )
+            check(
+                "latest action feedback takes priority in the shared status area",
+                status.message == "Applied 2 Assignments."
+            )
+        }
+
+        do {
+            let status = EditorStatusPresentation.resolve(
+                feedback: .none,
+                pendingChangeCount: 2,
+                applyBlockedExplanation: nil,
+                desktopCount: 3
+            )
+            check(
+                "pending Assignment changes fill an otherwise idle status area",
+                status.message == "2 unapplied changes."
+            )
+        }
+
+        do {
+            let blocked = EditorStatusPresentation.resolve(
+                feedback: .none,
+                pendingChangeCount: 1,
+                applyBlockedExplanation: "Move apps off unavailable Desktop 4.",
+                desktopCount: 3
+            )
+            check(
+                "a disabled Apply explanation takes priority over a pending count",
+                blocked.message == "Move apps off unavailable Desktop 4."
+            )
+
+            let noDesktops = EditorStatusPresentation.resolve(
+                feedback: .none,
+                pendingChangeCount: 1,
+                applyBlockedExplanation: nil,
+                desktopCount: 0
+            )
+            check(
+                "status explains disabled Apply when no Desktops are available",
+                noDesktops.message == "Apply is disabled because no Desktops are available on the active Display."
+            )
+
+            let clean = EditorStatusPresentation.resolve(
+                feedback: .none,
+                pendingChangeCount: 0,
+                applyBlockedExplanation: nil,
+                desktopCount: 3
+            )
+            check(
+                "status explains disabled Apply for a clean board",
+                clean.message == "No changes to apply."
+            )
+        }
+
         // MARK: - AppNavigation
 
         do {
