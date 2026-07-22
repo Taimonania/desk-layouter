@@ -54,10 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             button.image?.isTemplate = true
             button.toolTip = "Desk Layouter"
-            // The menu-bar icon is a direct entry point to the editor rather than a
-            // menu (issue #40): a left- or right-click opens it, or focuses the
-            // existing window when it is already open. Handling both mouse-up events
-            // gives right-click the same open-or-focus behavior.
+            // The menu-bar icon keeps the editor as its primary entry point (issue
+            // #40): a left-click opens it, or focuses the existing window when it is
+            // already open. A right-click instead pops a small menu for app-level
+            // commands like "Check for Updates…" (issue #45), so both mouse-up
+            // events are routed through `statusItemClicked`.
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -104,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let statusItem else { return }
 
         let menu = NSMenu()
-        // Sparkle enables/disables this item and populates its title; the action
+        // Sparkle enables/disables this item via `validateMenuItem:`; the action
         // must be `checkForUpdates:` targeting the standard updater controller.
         let checkForUpdates = NSMenuItem(
             title: "Check for Updates…",
