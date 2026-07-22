@@ -82,6 +82,20 @@ public struct ArrangeReport: Equatable, Sendable {
     public var hasResistance: Bool { !resisted.isEmpty }
 }
 
+/// One Arrange pass may cover multiple saved physical identities while those
+/// Displays are mirrored. Reporting stays attached to each Assignment's saved
+/// physical destination even though Accessibility uses the mirror primary's
+/// shared screen geometry for the actual move.
+public struct PhysicalDisplayArrangeReport: Equatable, Sendable {
+    public let display: DisplayIdentity
+    public let report: ArrangeReport
+
+    public init(display: DisplayIdentity, report: ArrangeReport) {
+        self.display = display
+        self.report = report
+    }
+}
+
 public enum WindowArrangeError: Error, Equatable {
     /// The Accessibility permission is not granted. Arrange prompts for it and
     /// moves nothing (acceptance criteria).
@@ -125,6 +139,43 @@ public enum ArrangeEngine {
             guard let display = application.display else { return false }
             return destinationSection.contains(display)
                 && application.desktopNumber == destination.desktopNumber
+        }
+    }
+
+    /// Partitions a logical Display pass back into its saved physical Assignment
+    /// destinations. Extended Displays naturally produce one partition; a mirror
+    /// group can produce one per member without misreporting an app under the
+    /// group's primary identity.
+    public static func reportsByAssignedDisplay(
+        _ report: ArrangeReport,
+        applications: [ManagedApplication]
+    ) -> [PhysicalDisplayArrangeReport] {
+        var displays: [DisplayIdentity] = []
+        var displayByBundleIdentifier: [String: DisplayIdentity] = [:]
+        for application in applications {
+            guard let display = application.display else { continue }
+            displayByBundleIdentifier[application.bundleIdentifier.lowercased()] = display
+            if !displays.contains(where: { $0.identifiesSameDisplay(as: display) }) {
+                displays.append(display)
+            }
+        }
+
+        func belongs(_ bundleIdentifier: String, to display: DisplayIdentity) -> Bool {
+            displayByBundleIdentifier[bundleIdentifier.lowercased()]?
+                .identifiesSameDisplay(as: display) == true
+        }
+
+        return displays.compactMap { display in
+            let partition = ArrangeReport(
+                arranged: report.arranged.filter { belongs($0, to: display) },
+                skipped: report.skipped.filter { belongs($0, to: display) },
+                resisted: report.resisted.filter { belongs($0.bundleIdentifier, to: display) }
+            )
+            guard !partition.arranged.isEmpty
+                    || !partition.skipped.isEmpty
+                    || !partition.resisted.isEmpty
+            else { return nil }
+            return PhysicalDisplayArrangeReport(display: display, report: partition)
         }
     }
 

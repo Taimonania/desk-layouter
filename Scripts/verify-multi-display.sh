@@ -191,6 +191,49 @@ launch_probe "$probe_app_a" "$probe_exe_a" "$window_file_a"
 launch_probe "$probe_app_b" "$probe_exe_b" "$window_file_b"
 /bin/sleep 0.5
 
+# Verify the disposable windows landed on the assigned managed Spaces. A
+# persistent app-binding read-back alone is not proof that the live session
+# honored it, so inspect each real window through WindowServer before arranging.
+current_spaces="$state_root/current-spaces-$mode.json"
+/usr/bin/defaults export com.apple.spaces - \
+    | /usr/bin/plutil -convert json -o "$current_spaces" -
+
+verify_window_space() {
+    local label="$1" exe="$2" window_file="$3" section_filter="$4"
+    local display_key desktop_number expected_id process_id window_number inspection
+    display_key="$(/usr/bin/jq -r \
+        "$section_filter | if .isMain then \"Main\" else .identity.colorSyncUUID end" \
+        "$snapshot_json")"
+    desktop_number="$(/usr/bin/jq -r "$section_filter | .activeDesktopNumber" "$snapshot_json")"
+    expected_id="$(/usr/bin/jq -r \
+        --arg key "$display_key" --argjson index "$(( desktop_number - 1 ))" '
+        [.SpacesDisplayConfiguration["Management Data"].Monitors[]
+          | select(.["Display Identifier"] == $key and (.Spaces | type == "array"))
+          | [.Spaces[] | select(has("TileLayoutManager") | not) | .ManagedSpaceID]
+        ][0][$index] // empty
+        ' "$current_spaces")"
+    [[ -n "$expected_id" ]] || {
+        print -u2 "FAIL: could not resolve $label's assigned managed Space"
+        return 1
+    }
+    process_id="$(/usr/bin/pgrep -n -f "$exe")"
+    window_number="$(<"$window_file")"
+    inspection="$("$exe" --inspect "$process_id" "$window_number")"
+    /usr/bin/jq -e --argjson expected "$expected_id" \
+        '.[0].managedSpaceIDs == [$expected]' <<< "$inspection" >/dev/null || {
+        print -u2 "FAIL: $label probe window did not land on managed Space $expected_id"
+        print -u2 "$inspection"
+        return 1
+    }
+}
+
+verify_window_space \
+    "built-in" "$probe_exe_a" "$window_file_a" \
+    '.sections | map(select(.isBuiltIn == true and .isMirrored == false)) | first'
+verify_window_space \
+    "external" "$probe_exe_b" "$window_file_b" \
+    '.sections | map(select(.isBuiltIn == false and .isMirrored == false)) | first'
+
 arrange_output="$state_root/arrange-$mode.json"
 swift run DeskLayouterMultiDisplaySystemTests arrange "$config_json" > "$arrange_output"
 arranged_count="$(/usr/bin/jq '[.[].arranged[]] | length' "$arrange_output")"

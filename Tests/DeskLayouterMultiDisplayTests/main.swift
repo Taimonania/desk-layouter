@@ -210,6 +210,22 @@ struct MultiDisplayTestRunner {
             let live = try! adapter.currentDisplayTopology()
             check("adapter resolves every extended physical Display", live.sections.map(\.orderedDesktopUUIDs) == [["B1", "B2"], ["E1", "E2", "E3"]])
             check("adapter exposes separate-Spaces and positional warning settings", live.displaysHaveSeparateSpaces && live.automaticallyRearrangesSpaces)
+            check(
+                "positional-order warning does not disable Display actions",
+                DisplaySettingsPresentation.actionsAllowed(for: live)
+                    && DisplaySettingsPresentation.feedback(for: live).message.contains("positional")
+            )
+
+            let sharedSpaces = DisplayTopologySnapshot(
+                displaysHaveSeparateSpaces: false,
+                automaticallyRearrangesSpaces: true,
+                sections: live.sections
+            )
+            check(
+                "separate-Spaces requirement takes precedence over the positional warning",
+                !DisplaySettingsPresentation.actionsAllowed(for: sharedSpaces)
+                    && DisplaySettingsPresentation.feedback(for: sharedSpaces).message.contains("separate Spaces is off")
+            )
 
             let activeAdapter = MacOSSpacesAdapter(
                 commandRunner: runner,
@@ -288,6 +304,64 @@ struct MultiDisplayTestRunner {
             } catch { raceError = error }
             check("Main-role topology race aborts", (raceError as? SpacesAdapterError) == .displayTopologyChanged)
             check("topology race performs no write/delete/Dock restart", runner.writes == writesBeforeRace && runner.deletes == deletesBeforeRace && runner.dockRestarts == restartsBeforeRace)
+
+            let replacement = DisplayIdentity(
+                colorSyncUUID: "REPLACEMENT-UUID",
+                lastKnownName: "Replacement Display"
+            )
+            let raceTokens = [
+                DisplayTopologySnapshot(
+                    displaysHaveSeparateSpaces: true,
+                    automaticallyRearrangesSpaces: false,
+                    sections: [expected.sections[0]]
+                ),
+                DisplayTopologySnapshot(
+                    displaysHaveSeparateSpaces: true,
+                    automaticallyRearrangesSpaces: false,
+                    sections: [
+                        section(primary: replacement, main: true, x: 0, desktops: ["B1", "B2"]),
+                        expected.sections[1],
+                    ]
+                ),
+                DisplayTopologySnapshot(
+                    displaysHaveSeparateSpaces: true,
+                    automaticallyRearrangesSpaces: false,
+                    sections: [
+                        section(primary: builtIn, main: false, x: 0, desktops: ["B1", "B2"]),
+                        section(primary: external, main: true, x: 1000, desktops: ["E1", "E2"]),
+                    ]
+                ),
+                DisplayTopologySnapshot(
+                    displaysHaveSeparateSpaces: true,
+                    automaticallyRearrangesSpaces: false,
+                    sections: [
+                        section(
+                            primary: builtIn,
+                            members: [builtIn, external],
+                            main: true,
+                            x: 0,
+                            desktops: ["B1", "B2"]
+                        ),
+                    ]
+                ),
+                DisplayTopologySnapshot(
+                    displaysHaveSeparateSpaces: false,
+                    automaticallyRearrangesSpaces: false,
+                    sections: expected.sections
+                ),
+                DisplayTopologySnapshot(
+                    displaysHaveSeparateSpaces: true,
+                    automaticallyRearrangesSpaces: false,
+                    sections: [
+                        section(primary: builtIn, main: true, x: 0, desktops: ["B2", "B1"]),
+                        expected.sections[1],
+                    ]
+                ),
+            ]
+            check(
+                "race token detects active set, identity, Main, mirror, separate-Spaces, and order changes",
+                raceTokens.allSatisfy { $0 != expected }
+            )
         }
 
         do {
@@ -348,6 +422,30 @@ struct MultiDisplayTestRunner {
             var board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [app]))
             board.markApplied(effectiveDesktopUUIDs: [app.bundleIdentifier: "M1"])
             check("mirroring preserves a member's saved physical identity", board.configuration.managedApplications.first?.display?.identifiesSameDisplay(as: external) == true)
+
+            let primaryApp = ManagedApplication(
+                bundleIdentifier: "com.example.mirror.primary",
+                displayName: "Primary app",
+                display: builtIn,
+                desktopNumber: 1,
+                layout: app.layout
+            )
+            let mirroredReports = ArrangeEngine.reportsByAssignedDisplay(
+                ArrangeReport(
+                    arranged: [primaryApp.bundleIdentifier, app.bundleIdentifier],
+                    skipped: [],
+                    resisted: []
+                ),
+                applications: [primaryApp, app]
+            )
+            check(
+                "mirrored Arrange reports remain under each saved physical Display",
+                mirroredReports.count == 2
+                    && mirroredReports[0].display.identifiesSameDisplay(as: builtIn)
+                    && mirroredReports[0].report.arranged == [primaryApp.bundleIdentifier]
+                    && mirroredReports[1].display.identifiesSameDisplay(as: external)
+                    && mirroredReports[1].report.arranged == [app.bundleIdentifier]
+            )
             let unchangedAfterUnmirror = DisplayTopologySnapshot(
                 displaysHaveSeparateSpaces: true,
                 automaticallyRearrangesSpaces: false,
@@ -397,7 +495,67 @@ struct MultiDisplayTestRunner {
             check("relaunch preserves the moved physical Display destination", relaunched.configuration.managedApplication(for: original.bundleIdentifier)?.display?.identifiesSameDisplay(as: external) == true)
 
             var library = PresetLibrary()
-            let preset = try! library.add(name: "Displays", managedApplications: board.configuration.managedApplications)
+            let builtCompanion = ManagedApplication(
+                bundleIdentifier: "com.example.built.preset",
+                displayName: "Built preset",
+                display: builtIn,
+                desktopNumber: 2,
+                layout: layout
+            )
+            let completeBoard = board.configuration.managedApplications + [builtCompanion]
+            let preset = try! library.add(name: "Displays", managedApplications: completeBoard)
+            let alternate = try! library.add(name: "Alternate", managedApplications: [original])
+
+            var loaded = BoardState()
+            loaded.load(configuration: preset.configuration, selectedPresetID: preset.id)
+            check(
+                "Preset load preserves every physical destination",
+                Set(loaded.configuration.managedApplications.compactMap { $0.display?.colorSyncUUID })
+                    == [builtIn.colorSyncUUID, external.colorSyncUUID]
+            )
+
+            library.update(id: preset.id, managedApplications: loaded.configuration.managedApplications)
+            check(
+                "Preset update preserves every physical destination",
+                Set(library.preset(for: preset.id)?.managedApplications.compactMap { $0.display?.colorSyncUUID } ?? [])
+                    == [builtIn.colorSyncUUID, external.colorSyncUUID]
+            )
+
+            loaded.move(bundleIdentifier: original.bundleIdentifier, toDisplay: builtIn, desktopNumber: 1)
+            let reverted = PresetEditing.revert(to: preset.id, library: library, board: loaded)
+            check(
+                "Preset revert restores the physical destination",
+                reverted.configuration.managedApplication(for: original.bundleIdentifier)?
+                    .display?.identifiesSameDisplay(as: external) == true
+            )
+
+            let switchedAway = PresetSwitch.discardAndSwitch(
+                target: alternate.id,
+                board: reverted,
+                library: library
+            )
+            let switchedBack = PresetSwitch.discardAndSwitch(
+                target: preset.id,
+                board: switchedAway,
+                library: library
+            )
+            check(
+                "Preset switch restores every physical destination",
+                Set(switchedBack.configuration.managedApplications.compactMap { $0.display?.colorSyncUUID })
+                    == [builtIn.colorSyncUUID, external.colorSyncUUID]
+            )
+
+            library = try! PresetEditing.rename(
+                id: preset.id,
+                to: "Renamed Displays",
+                library: library,
+                persist: { _ in }
+            )
+            check(
+                "Preset rename preserves every physical destination",
+                Set(library.preset(for: preset.id)?.managedApplications.compactMap { $0.display?.colorSyncUUID } ?? [])
+                    == [builtIn.colorSyncUUID, external.colorSyncUUID]
+            )
             let decodedLibrary = try! PresetLibrarySerialization.decode(
                 from: PresetLibrarySerialization.encode(library)
             )

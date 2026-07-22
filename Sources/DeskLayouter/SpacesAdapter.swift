@@ -321,51 +321,7 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             }
         }
 
-        // Rewrite the whole dictionary. A plain `-dict-add` can only add or
-        // replace keys, so the existing dictionary is cleared first and then the
-        // complete dictionary is written back — this is what lets a removed
-        // managed key actually disappear from the persistent store.
-        _ = try? commandRunner.run(
-            executable: "/usr/bin/defaults",
-            arguments: ["delete", "com.apple.spaces", "app-bindings"]
-        )
-        for bundleIdentifier in completeBindings.keys.sorted() {
-            guard let desktopUUID = completeBindings[bundleIdentifier] else {
-                continue
-            }
-            _ = try commandRunner.run(
-                executable: "/usr/bin/defaults",
-                arguments: [
-                    "write",
-                    "com.apple.spaces",
-                    "app-bindings",
-                    "-dict-add",
-                    bundleIdentifier,
-                    desktopUUID,
-                ]
-            )
-        }
-
-        _ = try commandRunner.run(
-            executable: "/usr/bin/killall",
-            arguments: ["Dock"]
-        )
-
-        // Persistent read-back verification: the store must now match the
-        // complete dictionary exactly — every managed change present, every
-        // removed-managed key gone, every unmanaged entry intact.
-        let writtenBindings = try readAppBindings()
-        guard writtenBindings == completeBindings else {
-            let allKeys = Set(writtenBindings.keys).union(completeBindings.keys)
-            let mismatched = allKeys
-                .filter { writtenBindings[$0] != completeBindings[$0] }
-                .sorted()
-            throw SpacesAdapterError.verificationFailed(bundleIdentifiers: mismatched)
-        }
-
-        // Live session update with the complete persisted dictionary, so removed
-        // and changed Assignments take effect in the current session too.
-        try sessionBindingUpdater.update(appBindings: writtenBindings)
+        try writeAndActivate(completeBindings: completeBindings)
     }
 
     public func apply(
