@@ -38,6 +38,7 @@ test:
 	swift run DeskLayouterUnavailableTests
 	swift run DeskLayouterVersionTests
 	swift run DeskLayouterAppStateTests
+	swift run DeskLayouterWelcomeTourTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh

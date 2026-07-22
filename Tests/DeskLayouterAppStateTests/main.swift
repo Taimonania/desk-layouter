@@ -67,6 +67,32 @@ struct AppStateTestRunner {
             )
         }
 
+        // MARK: - AppStateStore: hasSeenWelcome
+
+        do {
+            let (defaults, suiteName) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let store = AppStateStore(defaults: defaults)
+            check(
+                "hasSeenWelcome defaults to false on a fresh install",
+                store.hasSeenWelcome == false,
+                "got \(store.hasSeenWelcome)"
+            )
+        }
+
+        do {
+            let (defaults, suiteName) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            AppStateStore(defaults: defaults).hasSeenWelcome = true
+            // A separate store over the same defaults sees the persisted flag — the
+            // tour stays dismissed across launches once it has been seen.
+            let reloaded = AppStateStore(defaults: defaults)
+            check(
+                "hasSeenWelcome persists across store instances",
+                reloaded.hasSeenWelcome == true
+            )
+        }
+
         // MARK: - AppNavigation
 
         do {

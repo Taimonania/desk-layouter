@@ -24,13 +24,41 @@ struct AppRootView: View {
     let checkForUpdates: () -> Void
 
     var body: some View {
+        surface
+            // The Welcome tour floats over the board as a live spotlight overlay
+            // (issue #72). It reads the anchors the board's controls publish so it
+            // can dim around them; the overlay is shown only over the board, the
+            // only surface those controls (and the Help button) live on.
+            .overlayPreferenceValue(WelcomeAnchorKey.self) { anchors in
+                GeometryReader { proxy in
+                    if model.welcomeTour.isPresented, model.navigation.surface == .board {
+                        let frames = model.welcomeTour.currentStep.spotlightTargets
+                            .compactMap { anchors[$0] }
+                            .map { proxy[$0] }
+                        WelcomeTourOverlay(
+                            tour: model.welcomeTour,
+                            spotlightFrames: frames,
+                            containerSize: proxy.size,
+                            onNext: { model.welcomeNext() },
+                            onBack: { model.welcomeBack() },
+                            onSkip: { model.dismissWelcome() },
+                            onFinish: { model.dismissWelcome() }
+                        )
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var surface: some View {
         switch model.navigation.surface {
         case .board:
             EditorView(
                 model: editorModel,
                 quit: quit,
                 checkForUpdates: checkForUpdates,
-                openSettings: { model.showSettings() }
+                openSettings: { model.showSettings() },
+                openHelp: { model.openWelcome() }
             )
         case .settings:
             SettingsView(model: model)

@@ -22,7 +22,7 @@ let package = Package(
             path: "Sources/DeskLayouter",
             exclude: [
                 "AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift",
-                "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift",
+                "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift", "WelcomeTourOverlay.swift",
             ],
             sources: [
                 "SpacesAdapter.swift",
@@ -39,6 +39,7 @@ let package = Package(
                 "EditorPresenter.swift",
                 "AppStateStore.swift",
                 "AppNavigation.swift",
+                "WelcomeTour.swift",
             ]
         ),
         .executableTarget(
@@ -64,6 +65,7 @@ let package = Package(
                 "EditorPresenter.swift",
                 "AppStateStore.swift",
                 "AppNavigation.swift",
+                "WelcomeTour.swift",
             ]
         ),
         .executableTarget(
@@ -180,6 +182,11 @@ let package = Package(
             name: "DeskLayouterAppStateTests",
             dependencies: ["DeskLayouterMacOS"],
             path: "Tests/DeskLayouterAppStateTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterWelcomeTourTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterWelcomeTourTests"
         ),
     ]
 )
