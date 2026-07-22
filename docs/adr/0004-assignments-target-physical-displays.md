@@ -1,6 +1,7 @@
 # Assignments target physical Displays, never the Main role
 
-Status: Accepted (design; not yet implemented)
+Status: Accepted (physical-Display persistence and migration implemented in #21;
+multi-Display board projection follows in #22)
 
 Desk Layouter persists an Assignment destination as a specific physical Display plus a positional Desktop number. The macOS Main Display role is only a runtime adapter concern: whichever physical Display is Main may be represented by the private `"Main"` monitor alias, but that alias is never persisted as identity and changing Main does not change the user's Assignment. A proposed semantic **Follow Main Display** destination was rejected because macOS ultimately stores a concrete Desktop UUID, so following the role would require topology-driven re-Apply behavior and would make a saved board depend on a temporary system role.
 

@@ -32,6 +32,15 @@ struct PendingPresetRevert: Identifiable, Equatable {
     var id: UUID { presetID }
 }
 
+/// The one-time choice required before legacy Assignments can be attached in an
+/// extended multi-Display topology. It remains presented until a choice is
+/// successfully persisted; dismissing the sheet is disabled in the view.
+struct PendingDisplayMigration: Identifiable, Equatable {
+    let displays: [DisplayIdentity]
+
+    var id: String { displays.map(\.colorSyncUUID).joined(separator: "|") }
+}
+
 @MainActor
 final class EditorModel: ObservableObject {
     // Add-flow inputs (the searchable installed-app picker plus the chosen
@@ -60,6 +69,7 @@ final class EditorModel: ObservableObject {
     @Published var pendingPresetSwitch: PendingPresetSwitch?
     @Published var pendingPresetDeletion: PendingPresetDeletion?
     @Published var pendingPresetRevert: PendingPresetRevert?
+    @Published private(set) var pendingDisplayMigration: PendingDisplayMigration?
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
@@ -70,6 +80,7 @@ final class EditorModel: ObservableObject {
     private var board: BoardState
     private var presetLibrary: PresetLibrary
     private var selectedApplication: SelectedApplication?
+    private var latestDesktopSnapshot: DesktopSnapshot?
 
     // Runtime Arrange state (issue #27, ADR-0003; settling policy issue #62). The
     // arming policy and the bounded settling/retry across Desktop transitions live
@@ -165,7 +176,12 @@ final class EditorModel: ObservableObject {
     /// those stranded Assignments, so the user must first move them to an
     /// available Desktop. Missing *applications* never disable Apply — their
     /// bundle identifiers stay declarative data that takes effect if reinstalled.
-    var canApply: Bool { board.isDirty && desktopCount > 0 && !hasUnavailableDesktopAssignments }
+    var canApply: Bool {
+        !currentPendingChanges.isEmpty
+            && desktopCount > 0
+            && !hasUnavailableDesktopAssignments
+            && pendingDisplayMigration == nil
+    }
 
     /// True when at least one Assignment targets a Desktop that no longer exists,
     /// so the board shows the unavailable sections and Apply is blocked. Reads the
@@ -227,11 +243,19 @@ final class EditorModel: ObservableObject {
     /// board with no columns (and Apply disabled) rather than offering invalid
     /// Desktops. The saved board is untouched, so pending edits are preserved.
     func refreshDesktops() {
+        if prepareDisplayMigrationIfNeeded() {
+            latestDesktopSnapshot = nil
+            desktopCount = 0
+            refreshProjection()
+            return
+        }
         do {
             let snapshot = try spacesAdapter.currentDesktopSnapshot()
+            latestDesktopSnapshot = snapshot
             desktopCount = snapshot.orderedDesktopUUIDs.count
             newAssignmentDesktopNumber = min(max(newAssignmentDesktopNumber, 1), max(desktopCount, 1))
         } catch {
+            latestDesktopSnapshot = nil
             desktopCount = 0
             feedback = .failure(error.localizedDescription)
         }
@@ -266,6 +290,10 @@ final class EditorModel: ObservableObject {
             feedback = .info("No Desktops are available on the active display.")
             return
         }
+        guard let display = latestDesktopSnapshot?.display else {
+            feedback = .failure("The physical Display could not be identified. No Assignment was added.")
+            return
+        }
         guard (1...desktopCount).contains(newAssignmentDesktopNumber) else {
             feedback = .info(desktopDoesNotExistMessage(newAssignmentDesktopNumber))
             return
@@ -275,6 +303,7 @@ final class EditorModel: ObservableObject {
             ManagedApplication(
                 bundleIdentifier: selectedApplication.bundleIdentifier,
                 displayName: selectedApplication.displayName,
+                display: display,
                 desktopNumber: newAssignmentDesktopNumber
             )
         )
@@ -344,7 +373,7 @@ final class EditorModel: ObservableObject {
     /// advanced so it becomes clean; on failure the board stays dirty and can be
     /// retried.
     func apply() {
-        guard board.isDirty else {
+        guard !currentPendingChanges.isEmpty else {
             feedback = .info("No changes to apply.")
             return
         }
@@ -372,8 +401,8 @@ final class EditorModel: ObservableObject {
             )
             // Capture what changed in this Apply before advancing the baseline, so
             // the summary names only the apps whose Desktop actually changed.
-            let changedIdentifiers = Set(board.pendingChanges)
-            board.markApplied()
+            let changedIdentifiers = Set(board.pendingChanges(on: snapshot))
+            board.markApplied(effectiveDesktopUUIDs: managedBindings)
             var message = appliedSummary(changedIdentifiers: changedIdentifiers)
             do {
                 try boardStateStore.save(board)
@@ -981,7 +1010,110 @@ final class EditorModel: ObservableObject {
         )
         columns = boardProjection.availableColumns
         unavailableDesktops = boardProjection.unavailableDesktops
-        pendingChangeCount = board.pendingChangeCount
+        pendingChangeCount = currentPendingChanges.count
+    }
+
+    private var currentPendingChanges: [String] {
+        board.pendingChanges(on: latestDesktopSnapshot)
+    }
+
+    /// Resolves legacy Assignments before the editor exposes any mutating action.
+    /// One logical Display migrates automatically; multiple Displays produce a
+    /// persistent, explicit choice. This path only reads topology and writes the
+    /// app's JSON models — it never calls Apply or Arrange.
+    private func prepareDisplayMigrationIfNeeded() -> Bool {
+        guard AssignmentMigration.needsMigration(board: board, library: presetLibrary) else {
+            pendingDisplayMigration = nil
+            return false
+        }
+        do {
+            let displays = try spacesAdapter.availableDisplays()
+            guard !displays.isEmpty else {
+                feedback = .failure("No active display was found for migrating saved Assignments.")
+                return true
+            }
+            switch AssignmentMigration.plan(
+                board: board,
+                library: presetLibrary,
+                availableDisplays: displays
+            ) {
+            case .notNeeded:
+                pendingDisplayMigration = nil
+                return false
+            case let .requiresChoice(choices):
+                pendingDisplayMigration = PendingDisplayMigration(displays: choices)
+                feedback = .info("Choose the physical Display for your existing Assignments. Nothing will be Applied or Arranged.")
+                return true
+            case let .automatic(display):
+                let snapshot = try spacesAdapter.desktopSnapshot(for: display)
+                return !commitDisplayMigration(to: snapshot, automatic: true)
+            }
+        } catch {
+            feedback = .failure("Could not migrate saved Assignments: \(error.localizedDescription)")
+            return true
+        }
+    }
+
+    /// Applies the user's accessible migration choice consistently to the working
+    /// board, applied baseline, and every Preset, then permanently stores it.
+    func chooseDisplayForMigration(_ display: DisplayIdentity) {
+        guard pendingDisplayMigration?.displays.contains(where: {
+            $0.identifiesSameDisplay(as: display)
+        }) == true else {
+            return
+        }
+        do {
+            let snapshot = try spacesAdapter.desktopSnapshot(for: display)
+            if commitDisplayMigration(to: snapshot, automatic: false) {
+                pendingDisplayMigration = nil
+                refreshDesktops()
+            }
+        } catch {
+            feedback = .failure("Could not migrate saved Assignments: \(error.localizedDescription)")
+        }
+    }
+
+    @discardableResult
+    private func commitDisplayMigration(
+        to snapshot: DesktopSnapshot,
+        automatic: Bool
+    ) -> Bool {
+        do {
+            let appliedDesktopUUIDs = try spacesAdapter.persistedDesktopUUIDs(
+                for: Set(board.appliedAssignments.keys)
+            )
+            let migrated = AssignmentMigration.migrate(
+                board: board,
+                library: presetLibrary,
+                to: snapshot,
+                appliedDesktopUUIDs: appliedDesktopUUIDs
+            )
+
+            // Persist both complete values before exposing the migrated session.
+            // If the second write fails, restore the original first document so
+            // a later launch cannot observe a split migration choice.
+            try presetLibraryStore.save(migrated.library)
+            do {
+                try boardStateStore.save(migrated.board)
+            } catch {
+                try? presetLibraryStore.save(presetLibrary)
+                throw error
+            }
+            board = migrated.board
+            presetLibrary = migrated.library
+            latestDesktopSnapshot = snapshot
+            pendingDisplayMigration = nil
+            refreshPresets()
+            feedback = .success(
+                automatic
+                    ? "Attached existing Assignments to \(snapshot.display?.lastKnownName ?? "the active Display"). Nothing was Applied or Arranged."
+                    : "Attached existing Assignments to \(snapshot.display?.lastKnownName ?? "the chosen Display"). Nothing was Applied or Arranged."
+            )
+            return true
+        } catch {
+            feedback = .failure("Could not store migrated Assignments: \(error.localizedDescription)")
+            return false
+        }
     }
 }
 

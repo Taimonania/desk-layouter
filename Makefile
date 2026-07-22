@@ -29,6 +29,7 @@ test:
 	swift run DeskLayouterReconcilerTests
 	swift run DeskLayouterAdapterFailureTests
 	swift run DeskLayouterDisplayTests
+	swift run DeskLayouterMigrationTests
 	swift run DeskLayouterArrangeTests
 	swift run DeskLayouterArrangePlanTests
 	swift run DeskLayouterTransitionTests

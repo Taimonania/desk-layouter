@@ -12,6 +12,9 @@ import Foundation
 public struct ManagedApplication: Codable, Equatable, Sendable {
     public let bundleIdentifier: String
     public let displayName: String
+    /// The physical Display this Assignment targets. `nil` exists only while a
+    /// legacy document is waiting for launch-time migration.
+    public var display: DisplayIdentity?
     public var desktopNumber: Int
 
     /// Where this application's window sits on its Desktop's screen, or `nil`
@@ -27,13 +30,34 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
     public init(
         bundleIdentifier: String,
         displayName: String,
+        display: DisplayIdentity? = nil,
         desktopNumber: Int,
         layout: Layout? = nil
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
+        self.display = display
         self.desktopNumber = desktopNumber
         self.layout = layout
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case bundleIdentifier
+        case displayName
+        case display
+        case desktopNumber
+        case layout
+    }
+
+    /// Tolerant decoding keeps pre-Display Assignments intact and marks only the
+    /// missing identity for coordinated migration once the live topology is known.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bundleIdentifier = try container.decode(String.self, forKey: .bundleIdentifier)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        display = try container.decodeIfPresent(DisplayIdentity.self, forKey: .display)
+        desktopNumber = try container.decode(Int.self, forKey: .desktopNumber)
+        layout = try container.decodeIfPresent(Layout.self, forKey: .layout)
     }
 
     /// The name to show the user — the raw ``displayName`` with any trailing
@@ -44,7 +68,11 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
 
     /// The managed application's Assignment, as consumed by the planner.
     public var assignment: Assignment {
-        Assignment(bundleIdentifier: bundleIdentifier, desktopNumber: desktopNumber)
+        Assignment(
+            bundleIdentifier: bundleIdentifier,
+            display: display,
+            desktopNumber: desktopNumber
+        )
     }
 
     /// Whether this application carries a Layout that Arrange can actually enact:

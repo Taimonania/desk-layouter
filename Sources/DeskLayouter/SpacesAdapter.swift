@@ -5,6 +5,20 @@ import Foundation
 public protocol SpacesAdapter {
     func currentDesktopSnapshot() throws -> DesktopSnapshot
 
+    /// Physical Displays currently available as independent destinations.
+    func availableDisplays() throws -> [DisplayIdentity]
+
+    /// Resolves one selected physical Display to its current ordered Desktops.
+    /// Used by migration even while multi-Display editing remains disabled.
+    func desktopSnapshot(for display: DisplayIdentity) throws -> DesktopSnapshot
+
+    /// Concrete Desktop UUIDs currently persisted in macOS for the requested
+    /// managed bundle identifiers. Migration reads these as the true legacy
+    /// last-applied values; it must not infer them from today's Desktop order.
+    func persistedDesktopUUIDs(
+        for bundleIdentifiers: Set<String>
+    ) throws -> [String: String]
+
     /// The 1-based number of the Desktop currently active on the sole active
     /// Display, matching the numbering of ``currentDesktopSnapshot()`` (Desktop 1
     /// is the first ordered Desktop). Returns `nil` when the active Desktop cannot
@@ -34,6 +48,29 @@ public protocol SpacesAdapter {
         managedBundleIdentifiers: Set<String>,
         expectedSnapshot: DesktopSnapshot?
     ) throws
+}
+
+public extension SpacesAdapter {
+    /// Compatibility defaults keep focused test doubles small. Production uses
+    /// `MacOSSpacesAdapter`'s topology-aware implementations.
+    func availableDisplays() throws -> [DisplayIdentity] {
+        if let display = try currentDesktopSnapshot().display { return [display] }
+        return []
+    }
+
+    func desktopSnapshot(for display: DisplayIdentity) throws -> DesktopSnapshot {
+        let snapshot = try currentDesktopSnapshot()
+        guard snapshot.display?.identifiesSameDisplay(as: display) != false else {
+            throw SpacesAdapterError.noActiveDisplay
+        }
+        return DesktopSnapshot(display: display, orderedDesktopUUIDs: snapshot.orderedDesktopUUIDs)
+    }
+
+    func persistedDesktopUUIDs(
+        for bundleIdentifiers: Set<String>
+    ) throws -> [String: String] {
+        [:]
+    }
 }
 
 /// Runs an external command, returning its standard output.
@@ -78,15 +115,47 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         // lid closed, or a mirrored group — to the private "Main" monitor key,
         // then read that monitor's live Desktops. Zero or multiple extended
         // Displays throw before any store read, leaving macOS untouched.
-        let displayKey = try DisplayResolution.activeDisplayKey(
-            for: displayInventory.activeDisplays()
+        let displays = DisplayResolution.logicalDisplays(from: try displayInventory.activeDisplays())
+        guard let display = displays.first else { throw SpacesAdapterError.noActiveDisplay }
+        guard displays.count == 1 else { throw SpacesAdapterError.multipleDisplaysUnsupported }
+        guard display.isMain else { throw SpacesAdapterError.noActiveDisplay }
+        guard let identity = display.identity else {
+            throw SpacesAdapterError.displayEnumerationFailed
+        }
+        return try resolvedDesktopSnapshot(for: display, identity: identity)
+    }
+
+    public func availableDisplays() throws -> [DisplayIdentity] {
+        let displays = DisplayResolution.logicalDisplays(from: try displayInventory.activeDisplays())
+        guard !displays.isEmpty else { throw SpacesAdapterError.noActiveDisplay }
+        let identities = displays.compactMap(\.identity)
+        guard identities.count == displays.count else {
+            throw SpacesAdapterError.displayEnumerationFailed
+        }
+        return identities
+    }
+
+    public func desktopSnapshot(for display: DisplayIdentity) throws -> DesktopSnapshot {
+        let active = try DisplayResolution.activeDisplay(
+            matching: display,
+            in: displayInventory.activeDisplays()
         )
-        let store = try readStore()
-        let orderedDesktopUUIDs = try DisplayResolution.orderedDesktopUUIDs(
-            fromStore: store,
-            displayKey: displayKey
+        guard let currentIdentity = active.identity else {
+            throw SpacesAdapterError.displayEnumerationFailed
+        }
+        return try resolvedDesktopSnapshot(for: active, identity: currentIdentity)
+    }
+
+    public func persistedDesktopUUIDs(
+        for bundleIdentifiers: Set<String>
+    ) throws -> [String: String] {
+        let stored = try readAppBindings()
+        return Dictionary(
+            uniqueKeysWithValues: bundleIdentifiers.compactMap { bundleIdentifier in
+                guard let uuid = stored[bundleIdentifier.lowercased()] else { return nil }
+                return (bundleIdentifier, uuid)
+            }
         )
-        return DesktopSnapshot(orderedDesktopUUIDs: orderedDesktopUUIDs)
     }
 
     public func activeDesktopNumber() throws -> Int? {
@@ -223,6 +292,18 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
             throw SpacesAdapterError.storeFormatChanged
         }
         return store
+    }
+
+    private func resolvedDesktopSnapshot(
+        for display: ActiveDisplay,
+        identity: DisplayIdentity
+    ) throws -> DesktopSnapshot {
+        let displayKey = try DisplayResolution.displayKey(for: display)
+        let orderedDesktopUUIDs = try DisplayResolution.orderedDesktopUUIDs(
+            fromStore: readStore(),
+            displayKey: displayKey
+        )
+        return DesktopSnapshot(display: identity, orderedDesktopUUIDs: orderedDesktopUUIDs)
     }
 }
 

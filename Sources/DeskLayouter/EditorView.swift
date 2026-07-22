@@ -80,6 +80,15 @@ struct EditorView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .frame(minWidth: AppWindowConfiguration.minWidth, minHeight: AppWindowConfiguration.minHeight)
+        .sheet(item: Binding(
+            get: { model.pendingDisplayMigration },
+            set: { _ in }
+        )) { migration in
+            DisplayMigrationView(
+                migration: migration,
+                choose: { model.chooseDisplayForMigration($0) }
+            )
+        }
         .sheet(item: $editingLayoutCard) { card in
             LayoutEditorView(model: model, card: currentCard(for: card) ?? card)
         }
@@ -1038,6 +1047,46 @@ struct EditorView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Version \(version)")
         }
+    }
+}
+
+/// A non-dismissible, keyboard- and VoiceOver-accessible one-time migration
+/// choice. Each physical Display is one explicit button; no option is preselected
+/// and there is no default action that could silently choose the Main role.
+private struct DisplayMigrationView: View {
+    let migration: PendingDisplayMigration
+    let choose: (DisplayIdentity) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Choose a Display")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text("Existing Assignments need one physical Display. Your choice updates the board, applied state, and every Preset consistently. It does not Apply Assignments, Arrange windows, or move anything.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(migration.displays, id: \.colorSyncUUID) { display in
+                Button {
+                    choose(display)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(display.lastKnownName)
+                        Text(display.colorSyncUUID)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Use Display \(display.lastKnownName), identifier \(display.colorSyncUUID)")
+                .accessibilityHint("Attaches every legacy Assignment to this physical Display without Applying or Arranging")
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .interactiveDismissDisabled()
+        .accessibilityElement(children: .contain)
     }
 }
 

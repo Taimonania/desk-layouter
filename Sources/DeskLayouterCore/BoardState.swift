@@ -94,12 +94,18 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// the same model the planner and adapter consume on Apply.
     public private(set) var configuration: DeskLayouterConfiguration
 
-    /// The Desktop each managed application was assigned to as of the last
-    /// successful Apply (`bundleIdentifier → Desktop number`). The board diffs the
-    /// working configuration against this baseline to know what is pending; it is
-    /// persisted so the pending-versus-applied distinction survives quitting and
-    /// relaunching Desk Layouter.
-    public private(set) var appliedBaseline: [String: Int]
+    /// The semantic physical-Display destination and concrete Desktop UUID each
+    /// managed application had after the last successful Apply. The board diffs
+    /// the working configuration against this baseline to know what is pending;
+    /// it is persisted so semantic and effective pending state both survive quit.
+    public private(set) var appliedAssignments: [String: AppliedAssignment]
+
+    /// Compatibility projection used by existing board callers and by legacy
+    /// migration tests. New persistence stores ``appliedAssignments`` under the
+    /// historical `appliedBaseline` key so the document evolves in place.
+    public var appliedBaseline: [String: Int] {
+        appliedAssignments.mapValues(\.desktopNumber)
+    }
 
     /// The identity of the ``Preset`` this working copy was loaded from (or saved
     /// as). The optional representation exists only for backward-compatible
@@ -120,7 +126,23 @@ public struct BoardState: Codable, Equatable, Sendable {
         selectedPresetID: UUID? = nil
     ) {
         self.configuration = configuration
-        self.appliedBaseline = appliedBaseline ?? BoardState.baseline(from: configuration)
+        if let appliedBaseline {
+            appliedAssignments = appliedBaseline.mapValues {
+                AppliedAssignment(display: nil, desktopNumber: $0, concreteDesktopUUID: nil)
+            }
+        } else {
+            appliedAssignments = BoardState.baseline(from: configuration)
+        }
+        self.selectedPresetID = selectedPresetID
+    }
+
+    public init(
+        configuration: DeskLayouterConfiguration,
+        appliedAssignments: [String: AppliedAssignment],
+        selectedPresetID: UUID? = nil
+    ) {
+        self.configuration = configuration
+        self.appliedAssignments = appliedAssignments
         self.selectedPresetID = selectedPresetID
     }
 
@@ -141,11 +163,29 @@ public struct BoardState: Codable, Equatable, Sendable {
             forKey: .configuration
         )
         self.configuration = configuration
-        appliedBaseline = try container.decodeIfPresent(
+        if let current = try? container.decode(
+            [String: AppliedAssignment].self,
+            forKey: .appliedBaseline
+        ) {
+            appliedAssignments = current
+        } else if let legacy = try container.decodeIfPresent(
             [String: Int].self,
             forKey: .appliedBaseline
-        ) ?? BoardState.baseline(from: configuration)
+        ) {
+            appliedAssignments = legacy.mapValues {
+                AppliedAssignment(display: nil, desktopNumber: $0, concreteDesktopUUID: nil)
+            }
+        } else {
+            appliedAssignments = BoardState.baseline(from: configuration)
+        }
         selectedPresetID = try container.decodeIfPresent(UUID.self, forKey: .selectedPresetID)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(configuration, forKey: .configuration)
+        try container.encode(appliedAssignments, forKey: .appliedBaseline)
+        try container.encodeIfPresent(selectedPresetID, forKey: .selectedPresetID)
     }
 
     // MARK: - Column projection
@@ -186,13 +226,35 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// the working set but not the baseline), the moves (assigned to a different
     /// Desktop), and the removals (present in the baseline but no longer managed).
     public var pendingChanges: [String] {
+        pendingChanges(on: nil)
+    }
+
+    /// Pending Assignments against an optional live snapshot. Semantic changes
+    /// compare physical Display + Desktop number; when a snapshot is supplied,
+    /// concrete Desktop UUID drift is also pending even if the semantic
+    /// destination is unchanged.
+    public func pendingChanges(on snapshot: DesktopSnapshot?) -> [String] {
         let working = BoardState.baseline(from: configuration)
         var changed: Set<String> = []
-        for (bundleIdentifier, desktopNumber) in working
-        where appliedBaseline[bundleIdentifier] != desktopNumber {
-            changed.insert(bundleIdentifier)
+        for (bundleIdentifier, destination) in working {
+            guard let applied = appliedAssignments[bundleIdentifier] else {
+                changed.insert(bundleIdentifier)
+                continue
+            }
+            guard BoardState.sameSemanticDestination(destination, applied) else {
+                changed.insert(bundleIdentifier)
+                continue
+            }
+            if let snapshot,
+               let display = destination.display,
+               let snapshotDisplay = snapshot.display,
+               display.identifiesSameDisplay(as: snapshotDisplay),
+               snapshot.concreteDesktopUUID(at: destination.desktopNumber)
+                    != applied.concreteDesktopUUID {
+                changed.insert(bundleIdentifier)
+            }
         }
-        for bundleIdentifier in appliedBaseline.keys where working[bundleIdentifier] == nil {
+        for bundleIdentifier in appliedAssignments.keys where working[bundleIdentifier] == nil {
             changed.insert(bundleIdentifier)
         }
         return changed.sorted()
@@ -228,6 +290,7 @@ public struct BoardState: Codable, Equatable, Sendable {
             ManagedApplication(
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
+                display: application.display,
                 desktopNumber: desktopNumber,
                 layout: application.layout
             )
@@ -247,6 +310,7 @@ public struct BoardState: Codable, Equatable, Sendable {
             ManagedApplication(
                 bundleIdentifier: application.bundleIdentifier,
                 displayName: application.displayName,
+                display: application.display,
                 desktopNumber: application.desktopNumber,
                 layout: layout
             )
@@ -278,7 +342,7 @@ public struct BoardState: Codable, Equatable, Sendable {
         selectedPresetID: UUID
     ) {
         let managed = Set(newConfiguration.managedApplications.map(\.bundleIdentifier))
-        let removals = appliedBaseline.keys.filter { !managed.contains($0) }.sorted()
+        let removals = appliedAssignments.keys.filter { !managed.contains($0) }.sorted()
         configuration = DeskLayouterConfiguration(
             managedApplications: newConfiguration.managedApplications,
             pendingRemovals: removals
@@ -297,16 +361,54 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// successful Apply, so the board becomes clean, and clears the pending
     /// removals the adapter has now deleted. Call this only once the adapter has
     /// actually written the new bindings.
-    public mutating func markApplied() {
+    public mutating func markApplied(effectiveDesktopUUIDs: [String: String] = [:]) {
         configuration.clearPendingRemovals()
-        appliedBaseline = BoardState.baseline(from: configuration)
-    }
-
-    private static func baseline(from configuration: DeskLayouterConfiguration) -> [String: Int] {
-        Dictionary(
-            configuration.managedApplications.map { ($0.bundleIdentifier, $0.desktopNumber) },
+        appliedAssignments = Dictionary(
+            configuration.managedApplications.map { application in
+                (
+                    application.bundleIdentifier,
+                    AppliedAssignment(
+                        display: application.display,
+                        desktopNumber: application.desktopNumber,
+                        concreteDesktopUUID: effectiveDesktopUUIDs[application.bundleIdentifier]
+                    )
+                )
+            },
             uniquingKeysWith: { _, latest in latest }
         )
+    }
+
+    private static func baseline(
+        from configuration: DeskLayouterConfiguration
+    ) -> [String: AppliedAssignment] {
+        Dictionary(
+            configuration.managedApplications.map {
+                (
+                    $0.bundleIdentifier,
+                    AppliedAssignment(
+                        display: $0.display,
+                        desktopNumber: $0.desktopNumber,
+                        concreteDesktopUUID: nil
+                    )
+                )
+            },
+            uniquingKeysWith: { _, latest in latest }
+        )
+    }
+
+    private static func sameSemanticDestination(
+        _ working: AppliedAssignment,
+        _ applied: AppliedAssignment
+    ) -> Bool {
+        guard working.desktopNumber == applied.desktopNumber else { return false }
+        switch (working.display, applied.display) {
+        case (nil, nil):
+            return true
+        case let (workingDisplay?, appliedDisplay?):
+            return workingDisplay.identifiesSameDisplay(as: appliedDisplay)
+        default:
+            return false
+        }
     }
 }
 
