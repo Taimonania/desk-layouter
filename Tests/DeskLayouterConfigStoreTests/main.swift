@@ -394,8 +394,8 @@ struct ConfigStoreTestRunner {
         }
 
         // Preset library store, missing file: loading before any Preset is saved
-        // yields an empty library rather than an error, so a fresh install starts
-        // with no Presets (and the board shows "Custom Setup").
+        // yields an empty library rather than an error; the coordinated startup
+        // loader seeds the required Default Preset from that state.
         do {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)
@@ -472,9 +472,8 @@ struct ConfigStoreTestRunner {
             try? FileManager.default.removeItem(at: directory)
         }
 
-        // Board state store, migration keeps Custom Setup: an existing board-state
-        // file written before Presets existed loads with no selected Preset (shown
-        // as "Custom Setup"), and no Preset is created for it.
+        // Board state store compatibility: the low-level decoder preserves a
+        // missing legacy identity for coordinated startup reconciliation.
         do {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("DeskLayouterTests-\(UUID().uuidString)", isDirectory: true)

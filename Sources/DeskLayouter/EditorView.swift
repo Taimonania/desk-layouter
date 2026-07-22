@@ -275,7 +275,7 @@ struct EditorView: View {
                 Label("Delete Preset…", systemImage: "trash")
             }
             .disabled(!model.canDeleteSelectedPreset)
-            .help("Delete the selected Preset. Your working board is kept as Custom Setup.")
+            .help("Delete the selected Preset. At least one Preset is always kept.")
             .accessibilityLabel("Delete the selected Preset")
 
             Spacer(minLength: 0)
@@ -290,9 +290,7 @@ struct EditorView: View {
     }
 
     private func presetDeletionMessage(for pending: PendingPresetDeletion) -> String {
-        // The header only ever deletes the selected Preset, so the working board
-        // is kept as "Custom Setup". Nothing is Applied or Arranged.
-        "This removes the saved Preset \"\(pending.presetName)\". Your current board is kept as \"Custom Setup\" — nothing is Applied or Arranged, and no windows move."
+        "This removes the saved Preset \"\(pending.presetName)\". Your current board is kept and associated with another Preset — nothing is Applied or Arranged, and no windows move."
     }
 
     private var presetSwitchTitle: String {

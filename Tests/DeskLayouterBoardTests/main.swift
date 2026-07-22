@@ -356,7 +356,7 @@ struct BoardStateTestRunner {
 
         // Association and persistence: the selected-Preset association is set by
         // associate, survives serialization, and a document written before Presets
-        // existed decodes with no association (shown as "Custom Setup").
+        // existed decodes with no association for startup reconciliation.
         do {
             var board = BoardState(
                 configuration: DeskLayouterConfiguration(managedApplications: [app("A", "com.example.A", desktop: 1)])

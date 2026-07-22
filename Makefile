@@ -21,6 +21,7 @@ test:
 	swift run DeskLayouterPresetTests
 	swift run DeskLayouterPresetSwitchTests
 	swift run DeskLayouterPresetEditingTests
+	swift run DeskLayouterPresetStartupTests
 	swift run DeskLayouterLayoutTests
 	swift run DeskLayouterLayoutEditorTests
 	swift run DeskLayouterConfigStoreTests

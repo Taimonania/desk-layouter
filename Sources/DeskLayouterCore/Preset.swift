@@ -56,3 +56,10 @@ public enum PresetNameError: Error, Equatable, Sendable {
     /// the existing Preset's name as stored so feedback can quote it exactly.
     case duplicate(existingName: String)
 }
+
+/// Why a requested Preset deletion was rejected.
+public enum PresetDeletionError: Error, Equatable, Sendable {
+    /// The library's final Preset cannot be removed: every loaded board must stay
+    /// associated with one real, named Preset.
+    case lastPreset
+}

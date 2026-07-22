@@ -46,25 +46,29 @@ public enum PresetEditing {
     /// existing library and board, so a persistence failure prevents the delete
     /// without losing the Preset or the working board.
     ///
-    /// When the deleted Preset is the one currently selected, the working board's
-    /// association is changed to "Custom Setup" (a nil ``BoardState/selectedPresetID``)
-    /// while its configuration and applied baseline are preserved untouched —
-    /// deleting the selected Preset keeps its loaded working board, it just no
-    /// longer belongs to a saved Preset. When the deleted Preset is *not* selected,
+    /// The library's final Preset cannot be deleted. When the deleted Preset is
+    /// currently selected, the working board is associated with the first
+    /// remaining Preset in display order while its configuration and applied
+    /// baseline are preserved untouched. When an unselected Preset is deleted,
     /// the working board and its selection are returned unchanged.
     public static func delete(
         id: Preset.ID,
-        currentSelection: Preset.ID?,
+        currentSelection: Preset.ID,
         library: PresetLibrary,
         board: BoardState,
         persist: (PresetLibrary) throws -> Void
     ) throws -> (library: PresetLibrary, board: BoardState) {
+        guard library.presets.count > 1 else {
+            throw PresetDeletionError.lastPreset
+        }
         var updatedLibrary = library
-        updatedLibrary.delete(id: id)
+        guard updatedLibrary.delete(id: id) != nil else {
+            return (library, board)
+        }
         try persist(updatedLibrary)
         var updatedBoard = board
         if currentSelection == id {
-            updatedBoard.associateSelectedPreset(nil)
+            updatedBoard.associateSelectedPreset(updatedLibrary.orderedPresets[0].id)
         }
         return (updatedLibrary, updatedBoard)
     }

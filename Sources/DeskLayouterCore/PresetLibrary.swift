@@ -42,9 +42,9 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
     }
 
     /// Whether the working board has been modified relative to the Preset it is
-    /// associated with. Returns `false` when no resolvable Preset is selected
-    /// (a nil or dangling selection is "Custom Setup" — there is no stored Preset
-    /// to differ from). This is the dirty-relative-to-Preset detection that
+    /// associated with. Returns `false` for a legacy absent or dangling identity;
+    /// launch reconciliation repairs that persisted state before the editor uses
+    /// it. This is the dirty-relative-to-Preset detection that
     /// switching protection keys off; it is distinct from ``BoardState/isDirty``,
     /// which tracks pending Assignments awaiting Apply.
     public func isModified(
@@ -126,12 +126,15 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
     }
 
     /// Removes the Preset with the given identity from the library, leaving every
-    /// other Preset untouched. Deleting a Preset that is no longer in the library
-    /// is a harmless no-op. Returns the removed Preset, or `nil` when the identity
-    /// is unknown. This concerns Preset storage only — it never touches the working
-    /// board's selected-Preset association, which the caller reconciles.
+    /// other Preset untouched. The final Preset can never be removed. Deleting a
+    /// Preset that is no longer in the library, or attempting to delete the sole
+    /// remaining Preset, is a harmless no-op. Returns the removed Preset, or `nil`
+    /// when blocked or unknown. This concerns Preset storage only — it never
+    /// touches the working board's selected-Preset association, which the caller
+    /// reconciles.
     @discardableResult
     public mutating func delete(id: Preset.ID) -> Preset? {
+        guard presets.count > 1 else { return nil }
         guard let index = presets.firstIndex(where: { $0.id == id }) else { return nil }
         return presets.remove(at: index)
     }
@@ -143,25 +146,6 @@ public struct PresetLibrary: Codable, Equatable, Sendable {
     public mutating func update(id: Preset.ID, managedApplications: [ManagedApplication]) {
         guard let index = presets.firstIndex(where: { $0.id == id }) else { return }
         presets[index].managedApplications = managedApplications
-    }
-}
-
-/// The name to show for the current Preset selection in the editor header.
-///
-/// A working copy that is not associated with any saved Preset — a fresh
-/// install migrating its existing board (issue #49), or a board that has never
-/// been saved — reads as "Custom Setup". No Preset is created for it; the label
-/// is purely presentational.
-public enum PresetSelection {
-    /// The label shown when the working copy is not tied to a saved Preset.
-    public static let customSetupName = "Custom Setup"
-
-    /// The selection label for the given selected-Preset identity within a
-    /// library: the Preset's name when it resolves, or ``customSetupName`` when
-    /// the selection is absent or dangling.
-    public static func displayName(for id: Preset.ID?, in library: PresetLibrary) -> String {
-        guard let id, let preset = library.preset(for: id) else { return customSetupName }
-        return preset.name
     }
 }
 
