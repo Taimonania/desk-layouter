@@ -60,7 +60,13 @@ existing installs will accept.
 1. Bump `CFBundleShortVersionString` in `App/Info.plist` (SemVer). It is the
    single source of truth: the git tag is derived from it as `vX.Y.Z`, and
    `CFBundleVersion` should increment per build.
-2. Edit `RELEASE_NOTES.md`; keep the `## Highlights` and `## Notes` sections.
+2. Add the new version's entry to `CHANGELOG.md` — a `## <version> — <date>`
+   section (matching the bumped `CFBundleShortVersionString`) with user-facing
+   bullet highlights. `CHANGELOG.md` is the single source of release notes: the
+   app bundles it for the What's-New screen, and the pipeline derives this
+   release's GitHub notes from the matching section (hard-required — `preflight`
+   and `publish` both refuse without it). The static platform/signing "Notes"
+   footer is appended automatically, so the changelog holds only the highlights.
 3. Dry run (build → sign → notarize → staple → **appcast** → local verify,
    **no publish**):
    ```sh

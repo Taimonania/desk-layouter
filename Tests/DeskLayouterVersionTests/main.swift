@@ -74,6 +74,28 @@ struct VersionTestRunner {
             )
         }
 
+        // The raw semantic version (issue #73) never substitutes the `dev`
+        // fallback — `nil` is the signal there is no real version to compare.
+        do {
+            check(
+                "semanticVersion returns the trimmed raw version",
+                AppVersion.semanticVersion(fromShortVersion: " 0.1.2 ") == "0.1.2",
+                AppVersion.semanticVersion(fromShortVersion: " 0.1.2 ") ?? "nil"
+            )
+            check(
+                "semanticVersion is nil for a missing version (no dev fallback)",
+                AppVersion.semanticVersion(fromShortVersion: nil) == nil
+            )
+            check(
+                "semanticVersion is nil for a blank version",
+                AppVersion.semanticVersion(fromShortVersion: "  ") == nil
+            )
+            check(
+                "currentSemanticVersion is nil for a bundle without the key",
+                AppVersion.currentSemanticVersion(bundle: Bundle(for: BundleAnchor.self)) == nil
+            )
+        }
+
         if failures.isEmpty {
             print("App version tests passed")
         } else {

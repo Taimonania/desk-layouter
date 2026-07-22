@@ -39,6 +39,12 @@ plutil -lint "$contents_directory/Info.plist"
 # Contents/Resources/AppIcon.icns; Finder and the Dock read it from there.
 cp "$project_directory/App/AppIcon.icns" "$contents_directory/Resources/AppIcon.icns"
 
+# Bundle CHANGELOG.md into Resources (issue #73) so the app can read the release
+# highlights at runtime and show the What's-New screen after an upgrade. The
+# unbundled `swift run` build has no Resources dir and reads nil (graceful
+# fallback), so this is needed only for the packaged app.
+cp "$project_directory/CHANGELOG.md" "$contents_directory/Resources/CHANGELOG.md"
+
 # Embed Sparkle.framework. The executable links it as @rpath/Sparkle.framework,
 # but SwiftPM only leaves it in the build directory, so a relocatable .app must
 # carry its own copy under Contents/Frameworks and gain an rpath that points

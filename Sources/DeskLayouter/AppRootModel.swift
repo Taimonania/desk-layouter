@@ -1,3 +1,4 @@
+import DeskLayouterCore
 import DeskLayouterMacOS
 import SwiftUI
 
@@ -18,11 +19,44 @@ final class AppRootModel: ObservableObject {
     /// step/navigation logic while this model persists dismissal.
     @Published private(set) var welcomeTour: WelcomeTour
 
+    /// The What's-New surface's content, present only when the app was launched on
+    /// a newer version than last seen (issue #73). `nil` on a fresh install, a
+    /// dev/unbundled build, or an equal/lower version — the pure `WhatsNew.onLaunch`
+    /// seam decides, and this model persists `lastSeenVersion` in response.
+    @Published private(set) var whatsNew: WhatsNew?
+
     private let appState: AppStateStore
 
-    init(appState: AppStateStore) {
+    /// - Parameters:
+    ///   - currentVersion: the running build's raw version (defaults to the real
+    ///     bundle version; `nil` for the unbundled `swift run` build).
+    ///   - changelogText: the bundled `CHANGELOG.md` text (defaults to the real
+    ///     bundled resource; `nil` when unbundled).
+    init(
+        appState: AppStateStore,
+        currentVersion: String? = AppVersion.currentSemanticVersion(),
+        changelogText: String? = BundledChangelog.text()
+    ) {
         self.appState = appState
         self.welcomeTour = WelcomeTour.onLaunch(hasSeenWelcome: appState.hasSeenWelcome)
+
+        // Decide What's-New once, at launch, from the pure seam. Fresh installs
+        // record a baseline (so a later upgrade announces itself) but show nothing,
+        // leaving first-run to the Welcome tour; an upgrade opens the surface.
+        let entries = changelogText.map(Changelog.parse) ?? []
+        switch WhatsNew.onLaunch(
+            currentVersion: currentVersion,
+            lastSeenVersion: appState.lastSeenVersion,
+            entries: entries
+        ) {
+        case .none:
+            break
+        case let .recordBaseline(version):
+            appState.lastSeenVersion = version
+        case let .present(whatsNew):
+            self.whatsNew = whatsNew
+            self.navigation = AppNavigation(surface: .whatsNew)
+        }
     }
 
     /// Whether Sparkle installs updates automatically (`true`) or asks first
@@ -68,5 +102,15 @@ final class AppRootModel: ObservableObject {
     func dismissWelcome() {
         welcomeTour.dismiss()
         appState.hasSeenWelcome = true
+    }
+
+    /// Dismisses the What's-New surface (its "Done" control): returns to the board
+    /// and records the running version as `lastSeenVersion`, so the surface shows
+    /// once per upgrade and not on the next launch of the same version (issue #73).
+    func dismissWhatsNew() {
+        guard let version = whatsNew?.version else { return }
+        whatsNew?.dismiss()
+        appState.lastSeenVersion = version
+        navigation.showBoard()
     }
 }

@@ -38,17 +38,23 @@ Edit `App/Info.plist`: raise `CFBundleShortVersionString` (SemVer) and `CFBundle
 (next integer). Nothing else needs editing to change the version.
 
 ### 3. Write the release notes
-Draft `RELEASE_NOTES.md` from what shipped since the last tag. It MUST keep the two
-sections `## Highlights` (user-facing changes) and `## Notes` (platform/signing facts);
-the publish step refuses without them. Gather the changes:
+Add the new version's entry to `CHANGELOG.md`: a `## <version> — <date>` section
+(the version matching the `CFBundleShortVersionString` you just bumped) with one
+user-facing highlight bullet per real change. `CHANGELOG.md` is the single source
+of release notes — the app bundles it for the What's-New screen, and the pipeline
+derives this release's GitHub notes from the matching section (`preflight` and
+`publish` both refuse without a non-empty entry; the static platform/signing
+"Notes" footer is appended automatically, so keep only highlights here). Gather
+the changes:
 ```sh
 last=$(GH_HOST=github.com gh release view --repo Taimonania/desk-layouter --json tagName -q .tagName)
 git log --oneline "$last"..HEAD
 GH_HOST=github.com gh pr list --repo Taimonania/desk-layouter --state merged \
   --search "merged:>$(git log -1 --format=%aI "$last")" --json number,title
 ```
-One line per real change; honest and concise. Done when `RELEASE_NOTES.md` has both
-`## Highlights` and `## Notes` and every change since `$last` is represented in one of them.
+One line per real change; honest and concise. Done when `CHANGELOG.md` has a
+`## <version> — <date>` section for the new version and every change since `$last`
+is represented as a highlight in it.
 
 ### 4. Dry run (no publish)
 ```sh
