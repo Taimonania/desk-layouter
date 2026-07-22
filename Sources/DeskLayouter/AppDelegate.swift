@@ -42,8 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep direct `swift run` launches out of the Dock too. The bundled app
-        // also declares LSUIElement in Info.plist. Nothing opens the editor here,
-        // so launch stays a quiet menu-bar presence (issue #40).
+        // also declares LSUIElement in Info.plist, so the app stays a menu-bar
+        // (accessory) presence with no Dock icon even though it opens a window.
         NSApplication.shared.setActivationPolicy(.accessory)
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -66,10 +66,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
 
         startObservingDisplayReconfiguration()
+
+        // Launch opens the editor window automatically (issue #69). It is the same
+        // entry point as a menu-bar click, so the window the presenter retains is
+        // reused for the rest of the app's lifetime — no duplicate is ever created.
+        presenter.openOrFocusEditor()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// A re-launch of the (still-running) app, or any Dock/relaunch reopen request,
+    /// opens the editor if it was closed or focuses the existing window otherwise
+    /// (issue #69). Routing through the presenter reuses the retained window instead
+    /// of spawning a duplicate.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        presenter.openOrFocusEditor()
+        return true
     }
 
     /// Registers for display topology changes (connect/disconnect, lid open or

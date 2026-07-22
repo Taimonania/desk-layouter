@@ -91,6 +91,23 @@ struct MenuBarTestRunner {
                   "terminated \(terminated())")
         }
 
+        // Launch-open lifecycle (issue #69) — `AppDelegate` opens the editor on
+        // launch (`applicationDidFinishLaunching`) and on re-launch while already
+        // running (`applicationShouldHandleReopen`) through this same entry point.
+        // The reuse and no-terminate guarantees the launch flow relies on are the
+        // ones the blocks above cover; this scenario pins that launch drives exactly
+        // this seam, so a regression that opened the editor some other way surfaces.
+        do {
+            let (presenter, madeWindows, terminated) = makePresenter()
+            let onLaunch = presenter.openOrFocusEditor()
+            check("launch opens exactly one editor window", madeWindows() == 1,
+                  "made \(madeWindows())")
+            check("launch focuses the opened window", onLaunch.focusCount == 1,
+                  "focus \(onLaunch.focusCount)")
+            check("launch does not terminate the app", terminated() == 0,
+                  "terminated \(terminated())")
+        }
+
         // Header Quit action — quitting terminates immediately and unconditionally
         // (no confirmation gate), regardless of whether the editor was ever opened
         // or has pending edits waiting.

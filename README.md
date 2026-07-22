@@ -13,7 +13,7 @@ make test
 make test-desktop-placement
 ```
 
-The application bundle is written to `.build/Desk Layouter.app`. Desk Layouter runs as a menu-bar-only app; click its menu-bar icon to open the editor window. Closing the editor window leaves the app running.
+The application bundle is written to `.build/Desk Layouter.app`. Desk Layouter runs as a menu-bar-only app; launching it opens the editor window automatically, and clicking its menu-bar icon opens or focuses that window. Closing the editor window leaves the app running.
 
 `make test` runs the assignment planner at its pure data boundary without reading or writing the live macOS Desktop store.
 
