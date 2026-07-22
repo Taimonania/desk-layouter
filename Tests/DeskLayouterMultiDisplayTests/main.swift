@@ -305,6 +305,30 @@ struct MultiDisplayTestRunner {
             check("Main-role topology race aborts", (raceError as? SpacesAdapterError) == .displayTopologyChanged)
             check("topology race performs no write/delete/Dock restart", runner.writes == writesBeforeRace && runner.deletes == deletesBeforeRace && runner.dockRestarts == restartsBeforeRace)
 
+            let pendingApp = ManagedApplication(
+                bundleIdentifier: "com.example.pending.race",
+                displayName: "Pending race",
+                display: builtIn,
+                desktopNumber: 1
+            )
+            var pendingBoard = BoardState(
+                configuration: DeskLayouterConfiguration(managedApplications: [pendingApp])
+            )
+            pendingBoard.move(bundleIdentifier: pendingApp.bundleIdentifier, toDesktop: 2)
+            let pendingPlan = AssignmentPlanner().applyPlan(
+                configuration: pendingBoard.configuration,
+                on: expected
+            )
+            do {
+                try adapter.apply(plan: pendingPlan, expectedTopology: expected)
+            } catch {
+                // Expected: inventory still has the changed Main role above.
+            }
+            check(
+                "hot-plug/Main race keeps working edits pending",
+                pendingBoard.pendingChanges(on: expected) == [pendingApp.bundleIdentifier]
+            )
+
             let replacement = DisplayIdentity(
                 colorSyncUUID: "REPLACEMENT-UUID",
                 lastKnownName: "Replacement Display"
@@ -386,7 +410,8 @@ struct MultiDisplayTestRunner {
             check("separate-Spaces off performs no mutation", runner.writes == 0 && runner.deletes == 0 && runner.dockRestarts == 0 && runner.appBindings == ["keep": "B1"])
         }
 
-        // Only explicit removals delete; unresolved destinations are preserved.
+        // Only explicit removals delete; unavailable Displays are preserved,
+        // while an invalid Desktop on a connected Display blocks Apply.
         do {
             let disconnected = DisplayIdentity(colorSyncUUID: "OFFLINE", lastKnownName: "Travel Display")
             let config = DeskLayouterConfiguration(
@@ -397,8 +422,51 @@ struct MultiDisplayTestRunner {
                 pendingRemovals: ["com.example.removed"]
             )
             let plan = AssignmentPlanner().applyPlan(configuration: config, on: topology)
-            check("unavailable Display and Desktop bindings are preserved", plan.preservations == ["com.example.offline", "com.example.stale"], "got \(plan.preservations)")
+            check("unavailable Display binding is preserved", plan.preservations == ["com.example.offline"], "got \(plan.preservations)")
+            check("connected unavailable Desktop blocks Apply", plan.invalidDesktopAssignments == ["com.example.stale"])
             check("only explicit removals are deleted", plan.deletions == ["com.example.removed"])
+        }
+
+        // Even a hand-built invalid plan is rejected by the adapter before its
+        // preflight, store read, write, session update, or Dock restart.
+        do {
+            let inventory = MultiInventory([active(id: 1, identity: builtIn, main: true, x: 0)])
+            let runner = MultiStoreRunner(
+                monitors: ["Main": ["B1"]],
+                appBindings: ["com.example.unmanaged": "U1"]
+            )
+            let updater = MultiSessionUpdater()
+            let adapter = MacOSSpacesAdapter(
+                commandRunner: runner,
+                sessionBindingUpdater: updater,
+                displayInventory: inventory,
+                displaySettings: MultiSettings()
+            )
+            let expected = try! adapter.currentDisplayTopology()
+            var thrown: Error?
+            do {
+                try adapter.apply(
+                    plan: AssignmentApplyPlan(
+                        updates: ["com.example.valid": "B1"],
+                        deletions: [],
+                        preservations: [],
+                        invalidDesktopAssignments: ["com.example.invalid"]
+                    ),
+                    expectedTopology: expected
+                )
+            } catch { thrown = error }
+            check(
+                "adapter rejects an invalid Desktop plan",
+                (thrown as? SpacesAdapterError) == .invalidDesktopAssignments(
+                    bundleIdentifiers: ["com.example.invalid"]
+                )
+            )
+            check(
+                "invalid Desktop rejection performs no mutation or preflight",
+                runner.writes == 0 && runner.deletes == 0
+                    && runner.dockRestarts == 0 && updater.preflights == 0
+                    && runner.appBindings == ["com.example.unmanaged": "U1"]
+            )
         }
 
         // A mirror group resolves every member identity to one shared Desktop set,

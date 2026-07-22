@@ -114,6 +114,11 @@ public extension SpacesAdapter {
     }
 
     func apply(plan: AssignmentApplyPlan, expectedTopology: DisplayTopologySnapshot) throws {
+        guard plan.invalidDesktopAssignments.isEmpty else {
+            throw SpacesAdapterError.invalidDesktopAssignments(
+                bundleIdentifiers: plan.invalidDesktopAssignments.sorted()
+            )
+        }
         try apply(
             managedBindings: plan.updates,
             managedBundleIdentifiers: Set(plan.updates.keys).union(plan.deletions),
@@ -328,6 +333,11 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
         plan: AssignmentApplyPlan,
         expectedTopology: DisplayTopologySnapshot
     ) throws {
+        guard plan.invalidDesktopAssignments.isEmpty else {
+            throw SpacesAdapterError.invalidDesktopAssignments(
+                bundleIdentifiers: plan.invalidDesktopAssignments.sorted()
+            )
+        }
         try sessionBindingUpdater.preflight()
 
         let updates = Dictionary(
@@ -414,6 +424,7 @@ public enum SpacesAdapterError: LocalizedError, Equatable {
     case activeDesktopUnavailable
     case displayEnumerationFailed
     case displayTopologyChanged
+    case invalidDesktopAssignments(bundleIdentifiers: [String])
     case multipleDisplaysUnsupported
     case noActiveDisplay
     case noDesktopsFound
@@ -432,6 +443,8 @@ public enum SpacesAdapterError: LocalizedError, Equatable {
             "The active displays could not be read."
         case .displayTopologyChanged:
             "The displays changed while applying. Nothing was written — review the board and try again."
+        case let .invalidDesktopAssignments(bundleIdentifiers):
+            "Assignments target unavailable Desktops: \(bundleIdentifiers.joined(separator: ", ")). Move or remove them before Applying."
         case .multipleDisplaysUnsupported:
             "Multiple displays are not yet supported. Use a single active display."
         case .noActiveDisplay:

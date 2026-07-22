@@ -147,13 +147,41 @@ public struct DisplayBoardSection: Equatable, Sendable, Identifiable {
 
 public struct DisplayBoardProjection: Equatable, Sendable {
     public let sections: [DisplayBoardSection]
+    public let unavailableDisplays: [UnavailableDisplaySection]
 
-    public init(sections: [DisplayBoardSection]) {
+    public init(
+        sections: [DisplayBoardSection],
+        unavailableDisplays: [UnavailableDisplaySection] = []
+    ) {
         self.sections = sections
+        self.unavailableDisplays = unavailableDisplays
     }
 
     public var hasUnavailableDesktopAssignments: Bool {
         sections.contains { !$0.unavailableDesktops.isEmpty }
+    }
+}
+
+/// One saved physical Display that cannot be resolved uniquely in the live
+/// topology. Its cards remain fully editable, and an optional recovery candidate
+/// is only a suggestion that requires explicit confirmation.
+public struct UnavailableDisplaySection: Equatable, Sendable, Identifiable {
+    public let display: DisplayIdentity
+    public let cards: [BoardCard]
+    public let recoveryCandidate: DisplayIdentity?
+
+    public var id: String { display.colorSyncUUID.lowercased() }
+    public var displayName: String { display.lastKnownName }
+    public var assignmentCount: Int { cards.count }
+
+    public init(
+        display: DisplayIdentity,
+        cards: [BoardCard],
+        recoveryCandidate: DisplayIdentity?
+    ) {
+        self.display = display
+        self.cards = cards
+        self.recoveryCandidate = recoveryCandidate
     }
 }
 
@@ -165,21 +193,22 @@ public extension BoardState {
         on topology: DisplayTopologySnapshot,
         installedBundleIdentifiers: Set<String>
     ) -> DisplayBoardProjection {
+        func card(_ application: ManagedApplication) -> BoardCard {
+            BoardCard(
+                bundleIdentifier: application.bundleIdentifier,
+                displayName: application.displayName,
+                desktopNumber: application.desktopNumber,
+                display: application.display,
+                layout: application.layout,
+                isApplicationAvailable: installedBundleIdentifiers.contains(application.bundleIdentifier)
+            )
+        }
+
         let sections = topology.sections.map { snapshot -> DisplayBoardSection in
-            func card(_ application: ManagedApplication) -> BoardCard {
-                BoardCard(
-                    bundleIdentifier: application.bundleIdentifier,
-                    displayName: application.displayName,
-                    desktopNumber: application.desktopNumber,
-                    display: application.display,
-                    layout: application.layout,
-                    isApplicationAvailable: installedBundleIdentifiers.contains(application.bundleIdentifier)
-                )
-            }
 
             let applications = configuration.managedApplications.filter { application in
                 guard let display = application.display else { return false }
-                return snapshot.contains(display)
+                return topology.section(containing: display) == snapshot
             }
             let validRange = 1...max(snapshot.orderedDesktopUUIDs.count, 1)
             var available: [Int: [BoardCard]] = [:]
@@ -206,6 +235,31 @@ public extension BoardState {
                 unavailableDesktops: unavailableSections
             )
         }
-        return DisplayBoardProjection(sections: sections)
+
+        var unavailableOrder: [String] = []
+        var unavailableByID: [String: (DisplayIdentity, [BoardCard])] = [:]
+        for application in configuration.managedApplications {
+            guard let display = application.display,
+                  topology.section(containing: display) == nil
+            else { continue }
+            let id = display.colorSyncUUID.lowercased()
+            if unavailableByID[id] == nil {
+                unavailableOrder.append(id)
+                unavailableByID[id] = (display, [])
+            }
+            unavailableByID[id]?.1.append(card(application))
+        }
+        let unavailableDisplays = unavailableOrder.compactMap { id -> UnavailableDisplaySection? in
+            guard let (display, cards) = unavailableByID[id] else { return nil }
+            return UnavailableDisplaySection(
+                display: display,
+                cards: cards,
+                recoveryCandidate: topology.recoveryCandidate(for: display)
+            )
+        }
+        return DisplayBoardProjection(
+            sections: sections,
+            unavailableDisplays: unavailableDisplays
+        )
     }
 }

@@ -65,23 +65,24 @@ public struct AssignmentPlanner: Sendable {
     public init() {}
 
     /// Plans a complete multi-Display Apply. Only an explicitly removed managed
-    /// app is deleted; a disconnected Display or out-of-range Desktop is a
-    /// preservation, never an implicit deletion.
+    /// app is deleted. A disconnected/ambiguous Display is preserved, while an
+    /// out-of-range Desktop on a connected Display is invalid and blocks Apply.
     public func applyPlan(
         configuration: DeskLayouterConfiguration,
         on topology: DisplayTopologySnapshot
     ) -> AssignmentApplyPlan {
         var updates: [String: String] = [:]
         var preservations: Set<String> = []
+        var invalidDesktopAssignments: Set<String> = []
         for application in configuration.managedApplications {
-            guard
-                let display = application.display,
-                let uuid = topology.concreteDesktopUUID(
-                    display: display,
-                    desktopNumber: application.desktopNumber
-                )
+            guard let display = application.display,
+                  let section = topology.section(containing: display)
             else {
                 preservations.insert(application.bundleIdentifier)
+                continue
+            }
+            guard let uuid = section.concreteDesktopUUID(at: application.desktopNumber) else {
+                invalidDesktopAssignments.insert(application.bundleIdentifier)
                 continue
             }
             updates[application.bundleIdentifier] = uuid
@@ -89,7 +90,8 @@ public struct AssignmentPlanner: Sendable {
         return AssignmentApplyPlan(
             updates: updates,
             deletions: Set(configuration.pendingRemovals),
-            preservations: preservations
+            preservations: preservations,
+            invalidDesktopAssignments: invalidDesktopAssignments
         )
     }
 

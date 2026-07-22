@@ -1,5 +1,8 @@
 .PHONY: build run relaunch test test-desktop-placement benchmark-picker \
 	multi-display-arm multi-display-verify multi-display-restore \
+	unavailable-display-arm unavailable-display-external-disconnected \
+	unavailable-display-external-reconnected unavailable-display-lid-closed \
+	unavailable-display-lid-open unavailable-display-restore \
 	session-boundary-arm session-boundary-verify session-boundary-restore \
 	update-arm update-verify update-restore \
 	release release-preflight release-notes release-appcast verify-release
@@ -40,6 +43,7 @@ test:
 	swift run DeskLayouterDisplayNameTests
 	swift run DeskLayouterMenuBarTests
 	swift run DeskLayouterUnavailableTests
+	swift run DeskLayouterUnavailableDisplayTests
 	swift run DeskLayouterVersionTests
 	swift run DeskLayouterChangelogTests
 	swift run DeskLayouterAppStateTests
@@ -60,6 +64,26 @@ multi-display-verify:
 
 multi-display-restore:
 	./Scripts/verify-multi-display.sh restore
+
+# Human-gated transactional issue #23 harness. Start with the laptop open and
+# one external extended Display connected, then follow each phase's prompt.
+unavailable-display-arm:
+	./Scripts/verify-unavailable-display.sh arm
+
+unavailable-display-external-disconnected:
+	./Scripts/verify-unavailable-display.sh external-disconnected
+
+unavailable-display-external-reconnected:
+	./Scripts/verify-unavailable-display.sh external-reconnected
+
+unavailable-display-lid-closed:
+	./Scripts/verify-unavailable-display.sh lid-closed
+
+unavailable-display-lid-open:
+	./Scripts/verify-unavailable-display.sh lid-open
+
+unavailable-display-restore:
+	./Scripts/verify-unavailable-display.sh restore
 
 # Repeatable input-to-results diagnostic for issue #89. It measures in-memory
 # filtering, row presentation, and icon lookup separately over a 240-app catalog.

@@ -88,7 +88,9 @@ public struct DisplayTopologySnapshot: Equatable, Sendable {
     }
 
     public func section(containing display: DisplayIdentity) -> DisplayDesktopSectionSnapshot? {
-        sections.first { $0.contains(display) }
+        let matches = sections.filter { $0.contains(display) }
+        guard matches.count == 1 else { return nil }
+        return matches[0]
     }
 
     public func concreteDesktopUUID(
@@ -112,6 +114,22 @@ public struct DisplayTopologySnapshot: Equatable, Sendable {
         let suffix = String(section.primaryDisplay.colorSyncUUID.prefix(8))
         return "\(section.displayName) (\(suffix))"
     }
+
+    /// Offers a replacement identity only when the saved Display carries a
+    /// complete, nonzero hardware tuple and exactly one connected physical
+    /// Display with a different ColorSync UUID has that tuple. The caller must
+    /// still ask the user to confirm; this method never changes saved state.
+    public func recoveryCandidate(for savedDisplay: DisplayIdentity) -> DisplayIdentity? {
+        guard section(containing: savedDisplay) == nil else { return nil }
+        guard let savedHardware = savedDisplay.nonzeroHardwareIdentity else { return nil }
+        let physicalDisplays = sections.flatMap(\.memberDisplays)
+        let matches = physicalDisplays.filter { display in
+            !display.identifiesSameDisplay(as: savedDisplay)
+                && display.nonzeroHardwareIdentity == savedHardware
+        }
+        guard matches.count == 1 else { return nil }
+        return matches[0]
+    }
 }
 
 /// A physical Display plus a positional Desktop number.
@@ -132,14 +150,37 @@ public struct AssignmentApplyPlan: Equatable, Sendable {
     public let updates: [String: String]
     public let deletions: Set<String>
     public let preservations: Set<String>
+    /// Assignments whose physical Display is connected and uniquely resolved,
+    /// but whose positional Desktop no longer exists. Unlike an unavailable
+    /// Display, this is actionable invalid input and blocks every mutation.
+    public let invalidDesktopAssignments: Set<String>
 
     public init(
         updates: [String: String],
         deletions: Set<String>,
-        preservations: Set<String>
+        preservations: Set<String>,
+        invalidDesktopAssignments: Set<String> = []
     ) {
         self.updates = updates
         self.deletions = deletions
         self.preservations = preservations
+        self.invalidDesktopAssignments = invalidDesktopAssignments
+    }
+
+    /// Whether this plan is safe and has at least one concrete mutation.
+    public var canMutate: Bool {
+        invalidDesktopAssignments.isEmpty && (!updates.isEmpty || !deletions.isEmpty)
+    }
+
+    /// Whether at least one currently pending key can be enacted by this plan.
+    /// Resolvable but unchanged Assignments are still present in `updates` so the
+    /// adapter can write a complete desired set; they must not make an edit on an
+    /// unavailable Display look applicable.
+    public func hasResolvableMutation(
+        pendingBundleIdentifiers: Set<String>
+    ) -> Bool {
+        guard invalidDesktopAssignments.isEmpty else { return false }
+        return !pendingBundleIdentifiers.intersection(updates.keys).isEmpty
+            || !pendingBundleIdentifiers.intersection(deletions).isEmpty
     }
 }

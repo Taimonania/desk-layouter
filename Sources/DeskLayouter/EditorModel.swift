@@ -41,6 +41,15 @@ struct PendingDisplayMigration: Identifiable, Equatable {
     var id: String { displays.map(\.colorSyncUUID).joined(separator: "|") }
 }
 
+/// Explicit confirmation required before adopting a recovery identity. The
+/// suggestion is live-topology evidence only; no state changes until confirmed.
+struct PendingDisplayRecovery: Identifiable, Equatable {
+    let savedDisplay: DisplayIdentity
+    let candidate: DisplayIdentity
+
+    var id: String { savedDisplay.colorSyncUUID.lowercased() }
+}
+
 private struct DisplayArrangePass {
     let destination: DesktopAddress
     let applications: [ManagedApplication]
@@ -60,6 +69,7 @@ final class EditorModel: ObservableObject {
 
     // Board projection + pending state.
     @Published private(set) var displaySections: [DisplayBoardSection] = []
+    @Published private(set) var unavailableDisplaySections: [UnavailableDisplaySection] = []
     @Published private(set) var desktopCount = 0
     @Published private(set) var pendingChangeCount = 0
     @Published private(set) var feedback: EditorFeedback = .none
@@ -72,6 +82,7 @@ final class EditorModel: ObservableObject {
     @Published var pendingPresetDeletion: PendingPresetDeletion?
     @Published var pendingPresetRevert: PendingPresetRevert?
     @Published private(set) var pendingDisplayMigration: PendingDisplayMigration?
+    @Published private(set) var pendingDisplayRecovery: PendingDisplayRecovery?
 
     private let assignmentPlanner: AssignmentPlanner
     private let spacesAdapter: any SpacesAdapter
@@ -160,12 +171,13 @@ final class EditorModel: ObservableObject {
     }
 
     /// Apply is enabled when at least one pending mutation is resolvable across
-    /// the complete topology. Unavailable destinations remain pending and are
-    /// preserved rather than blocking resolvable updates or becoming deletions.
+    /// the complete topology. Unavailable Displays remain pending and are
+    /// preserved rather than blocking resolvable updates or becoming deletions;
+    /// an unavailable Desktop on a connected Display blocks the whole Apply.
     var canApply: Bool {
         !currentPendingChanges.isEmpty
             && latestDisplayTopology?.displaysHaveSeparateSpaces == true
-            && currentApplyPlan.map { !$0.updates.isEmpty || !$0.deletions.isEmpty } == true
+            && currentPlanHasResolvablePendingMutation
             && pendingDisplayMigration == nil
     }
 
@@ -175,9 +187,17 @@ final class EditorModel: ObservableObject {
         if latestDisplayTopology?.displaysHaveSeparateSpaces == false {
             return "Turn on Displays have separate Spaces in System Settings to Apply or Arrange. Your board and pending edits are preserved; nothing was changed."
         }
-        if currentApplyPlan.map({ $0.updates.isEmpty && $0.deletions.isEmpty }) == true,
+        if let invalid = currentApplyPlan?.invalidDesktopAssignments, !invalid.isEmpty {
+            let names = invalid.sorted().compactMap {
+                board.configuration.managedApplication(for: $0)?.presentedName
+            }
+            let subjects = names.isEmpty ? invalid.sorted().joined(separator: ", ") : names.joined(separator: ", ")
+            let possessive = invalid.count == 1 ? "its" : "their"
+            return "Move or remove \(subjects): \(possessive) connected Display does not currently have the assigned Desktop. Nothing can be Applied until every unavailable Desktop is resolved."
+        }
+        if !currentPlanHasResolvablePendingMutation,
            !currentPendingChanges.isEmpty {
-            return "Nothing resolvable can be Applied right now. Unavailable Display and Desktop Assignments remain pending and their macOS bindings are preserved."
+            return "Nothing resolvable can be Applied right now. Unavailable Display Assignments remain pending and their macOS bindings are preserved."
         }
         return nil
     }
@@ -190,7 +210,7 @@ final class EditorModel: ObservableObject {
         guard let topology = latestDisplayTopology,
               topology.displaysHaveSeparateSpaces
         else { return false }
-        return !layoutDestinations(in: topology).isEmpty
+        return board.configuration.managedApplications.contains(where: \.hasValidLayout)
     }
 
     /// The single status presentation shown above the footer. Latest action
@@ -407,7 +427,9 @@ final class EditorModel: ObservableObject {
                 return
             }
             let plan = assignmentPlanner.applyPlan(configuration: board.configuration, on: topology)
-            guard !plan.updates.isEmpty || !plan.deletions.isEmpty else {
+            guard plan.hasResolvableMutation(
+                pendingBundleIdentifiers: Set(currentPendingChanges)
+            ) else {
                 feedback = .info(applyBlockedExplanation ?? "Nothing resolvable can be Applied.")
                 return
             }
@@ -415,8 +437,12 @@ final class EditorModel: ObservableObject {
             // Capture what changed in this Apply before advancing the baseline, so
             // the summary names only the apps whose Desktop actually changed.
             let changedIdentifiers = Set(board.pendingChanges(on: topology))
+                .intersection(plan.updates.keys)
             board.markApplied(plan)
-            var message = appliedSummary(changedIdentifiers: changedIdentifiers)
+            var message = appliedSummary(
+                changedIdentifiers: changedIdentifiers,
+                plan: plan
+            )
             do {
                 try boardStateStore.save(board)
             } catch {
@@ -436,10 +462,20 @@ final class EditorModel: ObservableObject {
     /// Assignment actually changed in this Apply — those are the ones that must be
     /// quit and relaunched before they use their new Desktop. Unchanged apps and
     /// removed apps are not listed.
-    private func appliedSummary(changedIdentifiers: Set<String>) -> String {
-        let count = board.configuration.managedApplications.count
-        let noun = count == 1 ? "Assignment" : "Assignments"
-        var message = "Applied \(count) \(noun)."
+    private func appliedSummary(
+        changedIdentifiers: Set<String>,
+        plan: AssignmentApplyPlan
+    ) -> String {
+        let appliedNoun = plan.updates.count == 1 ? "Assignment" : "Assignments"
+        var message = "Applied \(plan.updates.count) available \(appliedNoun)."
+        if !plan.deletions.isEmpty {
+            let noun = plan.deletions.count == 1 ? "Assignment" : "Assignments"
+            message += " Deleted \(plan.deletions.count) removed \(noun)."
+        }
+        if !plan.preservations.isEmpty {
+            let noun = plan.preservations.count == 1 ? "Assignment" : "Assignments"
+            message += " Preserved \(plan.preservations.count) unavailable Display \(noun)."
+        }
 
         let managedIdentifiers = Set(board.configuration.managedApplications.map(\.bundleIdentifier))
         let runningNames = applications
@@ -595,6 +631,16 @@ final class EditorModel: ObservableObject {
                 return "\(displayName) Desktop \(destination.desktopNumber)"
             }.joined(separator: ", ")
             message += " Waiting to arrange \(destinations) on first visit."
+        }
+        let unavailable = unavailableDisplaySections.compactMap { section in
+            section.cards.contains(where: { $0.layout?.isValid == true })
+                ? section.displayName
+                : nil
+        }
+        let unavailableMessage = ArrangeReportPresenter.unavailableDisplaysMessage(unavailable)
+        if !unavailableMessage.isEmpty {
+            if !message.isEmpty { message += " " }
+            message += unavailableMessage
         }
         if message.isEmpty { message = "No valid Layouts are visible to arrange." }
         return announcements.contains(where: { $0.tone == .failure })
@@ -1103,8 +1149,10 @@ final class EditorModel: ObservableObject {
                 installedBundleIdentifiers: Set(applications.map(\.bundleIdentifier))
             )
             displaySections = projection.sections
+            unavailableDisplaySections = projection.unavailableDisplays
         } else {
             displaySections = []
+            unavailableDisplaySections = []
         }
         pendingChangeCount = currentPendingChanges.count
     }
@@ -1119,6 +1167,53 @@ final class EditorModel: ObservableObject {
     private var currentApplyPlan: AssignmentApplyPlan? {
         guard let topology = latestDisplayTopology else { return nil }
         return assignmentPlanner.applyPlan(configuration: board.configuration, on: topology)
+    }
+
+    private var currentPlanHasResolvablePendingMutation: Bool {
+        currentApplyPlan?.hasResolvableMutation(
+            pendingBundleIdentifiers: Set(currentPendingChanges)
+        ) == true
+    }
+
+    /// Opens the explicit recovery confirmation for the exact suggestion shown
+    /// in an unavailable Display section. Revalidating membership prevents stale
+    /// UI state from substituting a different live identity.
+    func requestDisplayRecovery(
+        savedDisplay: DisplayIdentity,
+        candidate: DisplayIdentity
+    ) {
+        guard unavailableDisplaySections.contains(where: {
+            $0.display.identifiesSameDisplay(as: savedDisplay)
+                && $0.recoveryCandidate == candidate
+        }) else { return }
+        pendingDisplayRecovery = PendingDisplayRecovery(
+            savedDisplay: savedDisplay,
+            candidate: candidate
+        )
+    }
+
+    func cancelDisplayRecovery() {
+        pendingDisplayRecovery = nil
+    }
+
+    /// Confirmation changes only the persisted working board. The applied
+    /// baseline and selected Preset remain intact, so Apply-dirty and
+    /// Preset-dirty state accurately reflect the explicit recovery edit.
+    func confirmDisplayRecovery() {
+        guard let pending = pendingDisplayRecovery,
+              let topology = latestDisplayTopology,
+              topology.section(containing: pending.savedDisplay) == nil,
+              topology.recoveryCandidate(for: pending.savedDisplay) == pending.candidate
+        else {
+            pendingDisplayRecovery = nil
+            return
+        }
+        pendingDisplayRecovery = nil
+        mutateAndPersist(
+            info: "Recovered Assignments to \(pending.candidate.lastKnownName). Click Apply to enforce them."
+        ) {
+            $0.recoverDisplay(pending.savedDisplay, as: pending.candidate)
+        }
     }
 
     /// Keeps the Desktop picker valid when the user explicitly chooses another

@@ -22,6 +22,12 @@ struct MultiDisplaySystemTestRunner {
             let topology = try adapter.currentDisplayTopology()
             let plan = AssignmentPlanner().applyPlan(configuration: configuration, on: topology)
             try adapter.apply(plan: plan, expectedTopology: topology)
+        case "plan":
+            guard CommandLine.arguments.count == 3 else { usage() }
+            let configuration = try configuration(at: CommandLine.arguments[2])
+            let topology = try MacOSSpacesAdapter().currentDisplayTopology()
+            let plan = AssignmentPlanner().applyPlan(configuration: configuration, on: topology)
+            try printPlan(plan)
         case "arrange":
             guard CommandLine.arguments.count == 3 else { usage() }
             let configuration = try configuration(at: CommandLine.arguments[2])
@@ -97,6 +103,18 @@ struct MultiDisplaySystemTestRunner {
         print(String(decoding: data, as: UTF8.self))
     }
 
+    private static func printPlan(_ plan: AssignmentApplyPlan) throws {
+        let object: [String: Any] = [
+            "updates": plan.updates,
+            "deletions": plan.deletions.sorted(),
+            "preservations": plan.preservations.sorted(),
+            "invalidDesktopAssignments": plan.invalidDesktopAssignments.sorted(),
+            "canMutate": plan.canMutate,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        print(String(decoding: data, as: UTF8.self))
+    }
+
     private static func destinationOrder(
         _ topology: DisplayTopologySnapshot
     ) -> (DesktopAddress, DesktopAddress) -> Bool {
@@ -126,7 +144,7 @@ struct MultiDisplaySystemTestRunner {
     }
 
     private static func usage() -> Never {
-        fputs("usage: DeskLayouterMultiDisplaySystemTests snapshot | apply CONFIG.json | arrange CONFIG.json\n", stderr)
+        fputs("usage: DeskLayouterMultiDisplaySystemTests snapshot | plan CONFIG.json | apply CONFIG.json | arrange CONFIG.json\n", stderr)
         exit(2)
     }
 }

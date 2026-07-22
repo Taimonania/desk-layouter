@@ -35,6 +35,27 @@ public struct DisplayIdentity: Codable, Equatable, Hashable, Sendable {
     public func identifiesSameDisplay(as other: DisplayIdentity) -> Bool {
         colorSyncUUID.caseInsensitiveCompare(other.colorSyncUUID) == .orderedSame
     }
+
+    /// Recovery deliberately requires the complete public hardware tuple. A
+    /// zero or missing component is not identifying evidence and must remain
+    /// ambiguous until the user explicitly reassigns the Assignment.
+    var nonzeroHardwareIdentity: HardwareDisplayIdentity? {
+        guard let vendorID, vendorID != 0,
+              let modelID, modelID != 0,
+              let serialNumber, serialNumber != 0
+        else { return nil }
+        return HardwareDisplayIdentity(
+            vendorID: vendorID,
+            modelID: modelID,
+            serialNumber: serialNumber
+        )
+    }
+}
+
+struct HardwareDisplayIdentity: Equatable, Hashable, Sendable {
+    let vendorID: UInt32
+    let modelID: UInt32
+    let serialNumber: UInt32
 }
 
 /// What the most recent successful Apply wrote for one managed application.

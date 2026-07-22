@@ -104,6 +104,15 @@ public enum ArrangeReportPresenter {
         )
     }
 
+    /// Reports Layouts deliberately skipped because their saved physical
+    /// Displays are unavailable. Names are de-duplicated and sorted so one
+    /// Display with several Layouts is reported once.
+    public static func unavailableDisplaysMessage(_ displayNames: [String]) -> String {
+        let names = sortedNames(Array(Set(displayNames)))
+        guard !names.isEmpty else { return "" }
+        return "Skipped Layouts on unavailable Displays: \(list(names))."
+    }
+
     /// Display-addressed variant used by multi-Display Arrange. Every result is
     /// explicitly attributed to both the physical Display and Desktop.
     public static func announce(
