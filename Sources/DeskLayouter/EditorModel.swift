@@ -403,12 +403,29 @@ final class EditorModel: ObservableObject {
     /// the move are surfaced in the feedback rather than dropped silently.
     func arrange() {
         let applications = board.configuration.managedApplications
-        let activeDesktop = try? spacesAdapter.activeDesktopNumber()
 
-        // Immediately arrange the active Desktop. The engine only reaches the
-        // active Space, so this enacts exactly the Layouts on the Desktop in front
-        // of the user right now.
-        guard let report = runArrange(applications) else { return }
+        // Resolve the Desktop that is LIVE-active in the current WindowServer
+        // session (issue #61). This is deliberately not the exported store's
+        // `Current Space`, which can lag behind the session. If it cannot be
+        // resolved or mapped, fail closed: move no windows and arm no Desktop, so
+        // no Desktop is wrongly treated as completed.
+        guard let activeDesktop = try? spacesAdapter.activeDesktopNumber() else {
+            feedback = .failure(
+                "Could not determine the active Desktop, so nothing was arranged. "
+                    + "Make sure a single display is active, then press Arrange again."
+            )
+            return
+        }
+
+        // Immediately arrange the active Desktop, passing only the applications
+        // assigned to it. The engine only reaches the active Space, so scoping to
+        // this Desktop's apps means apps on other Desktops are neither moved nor
+        // reported during this pass.
+        let activeDesktopApplications = ArrangeEngine.applications(
+            applications,
+            assignedToDesktop: activeDesktop
+        )
+        guard let report = runArrange(activeDesktopApplications) else { return }
 
         // Arm the other Desktops that have Layouts. `activeDesktop` is excluded
         // because it was just arranged above.
@@ -523,7 +540,15 @@ final class EditorModel: ObservableObject {
         case .ignore:
             return
         case let .arrange(tearDownAfter):
-            if let report = runArrange(board.configuration.managedApplications) {
+            // `desktopBecameActive` only returns `.arrange` for a known, armed
+            // Desktop, so `activeDesktop` is non-nil here; scope the pass to that
+            // Desktop's apps so a visited armed Desktop reports only its own apps.
+            guard let activeDesktop else { return }
+            let activeDesktopApplications = ArrangeEngine.applications(
+                board.configuration.managedApplications,
+                assignedToDesktop: activeDesktop
+            )
+            if let report = runArrange(activeDesktopApplications) {
                 feedback = arrangeFeedback(
                     for: report,
                     activeDesktop: activeDesktop,

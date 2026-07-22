@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import DeskLayouterCore
 import Foundation
 
@@ -30,6 +31,54 @@ public struct ActiveDisplay: Equatable, Sendable {
 /// and multiple extended) without real hardware.
 public protocol DisplayInventoryProviding {
     func activeDisplays() throws -> [ActiveDisplay]
+}
+
+/// Reads the live active managed Space ID from the current WindowServer session.
+///
+/// Runtime Arrange (#61) resolves which Desktop is actually in front of the user
+/// from this live value rather than the exported `com.apple.spaces` store's
+/// `"Current Space"`, which can lag behind the session. Injectable so
+/// `MacOSSpacesAdapter` can be exercised against a controlled active Space
+/// without touching WindowServer.
+public protocol ActiveSpaceProviding {
+    /// The live active managed Space ID, or `nil` when it cannot be read (an
+    /// unavailable private ABI or a WindowServer that reports no space). A `nil`
+    /// makes the active Desktop unresolvable, so Arrange fails closed.
+    func activeManagedSpaceID() throws -> UInt64?
+}
+
+private typealias ActiveSpaceMainConnection = @convention(c) () -> Int32
+private typealias ActiveSpaceFunction = @convention(c) (Int32) -> UInt64
+
+/// The production active-Space reader, resolving the private SkyLight
+/// `SLSGetActiveSpace` symbol dynamically (matching `Scripts/desktop-placement-probe.swift`).
+/// An unavailable symbol resolves to `nil` so the caller fails closed rather than
+/// throwing — Arrange then reports it could not determine the active Desktop.
+public struct SkyLightActiveSpaceProvider: ActiveSpaceProviding {
+    public init() {}
+
+    public func activeManagedSpaceID() throws -> UInt64? {
+        guard let skyLight = dlopen(
+            "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+            RTLD_NOW
+        ) else {
+            return nil
+        }
+        defer { dlclose(skyLight) }
+
+        guard
+            let mainConnectionSymbol = dlsym(skyLight, "SLSMainConnectionID")
+                ?? dlsym(skyLight, "CGSMainConnectionID"),
+            let activeSpaceSymbol = dlsym(skyLight, "SLSGetActiveSpace")
+                ?? dlsym(skyLight, "CGSGetActiveSpace")
+        else {
+            return nil
+        }
+
+        let mainConnection = unsafeBitCast(mainConnectionSymbol, to: ActiveSpaceMainConnection.self)
+        let getActiveSpace = unsafeBitCast(activeSpaceSymbol, to: ActiveSpaceFunction.self)
+        return getActiveSpace(mainConnection())
+    }
 }
 
 /// Pure display-topology and private-store resolution.
@@ -101,30 +150,51 @@ public enum DisplayResolution {
         return orderedDesktopUUIDs
     }
 
-    /// Resolves the 1-based number of the Desktop currently active on the given
-    /// Display from an exported `com.apple.spaces` store, matching the numbering
-    /// of ``orderedDesktopUUIDs(fromStore:displayKey:)`` (Desktop 1 is the first
-    /// ordered Desktop). Returns `nil` when the current Space cannot be read or is
-    /// not one of the Display's ordered Desktops — Arrange treats an unidentified
-    /// active Desktop as "unknown" rather than guessing.
+    /// Resolves the 1-based number of the Desktop whose managed Space ID is
+    /// `managedSpaceID` from an exported `com.apple.spaces` store, matching the
+    /// numbering of ``orderedDesktopUUIDs(fromStore:displayKey:)`` (Desktop 1 is
+    /// the first ordered Desktop). Returns `nil` when the ordered Desktops cannot
+    /// be read or none carries that managed Space ID — Arrange treats an
+    /// unmappable active Space as "unknown" and fails closed rather than guessing.
     ///
-    /// The store records the live current Space per monitor under
-    /// `"Current Space" → "uuid"`; the number is that uuid's position in the same
-    /// ordered, TileLayoutManager-filtered Desktop list Assignment already uses.
-    public static func activeDesktopNumber(
+    /// `managedSpaceID` is the LIVE active managed Space ID read from WindowServer
+    /// (see ``ActiveSpaceProviding``), deliberately used in place of the store's
+    /// `"Current Space"` value, which can lag behind the live session (issue #61).
+    /// The number is that ID's position in the same ordered,
+    /// TileLayoutManager-filtered Desktop list Assignment already uses.
+    public static func desktopNumber(
+        forManagedSpaceID managedSpaceID: UInt64,
         fromStore store: [String: Any],
         displayKey: String
     ) -> Int? {
         guard
-            let displayEntry = monitorEntry(fromStore: store, displayKey: displayKey),
-            let currentSpace = displayEntry["Current Space"] as? [String: Any],
-            let currentUUID = currentSpace["uuid"] as? String,
-            let orderedDesktopUUIDs = try? orderedDesktopUUIDs(fromStore: store, displayKey: displayKey),
-            let index = orderedDesktopUUIDs.firstIndex(of: currentUUID)
+            let managedSpaceIDs = orderedManagedSpaceIDs(fromStore: store, displayKey: displayKey),
+            let index = managedSpaceIDs.firstIndex(of: managedSpaceID)
         else {
             return nil
         }
         return index + 1
+    }
+
+    /// The managed Space IDs of the given Display's ordered Desktops, in the same
+    /// positional order and with the same TileLayoutManager filtering as
+    /// ``orderedDesktopUUIDs(fromStore:displayKey:)``, so an ID's index lines up
+    /// with its Desktop number. Returns `nil` when the live monitor entry or its
+    /// `Spaces` array is missing.
+    private static func orderedManagedSpaceIDs(
+        fromStore store: [String: Any],
+        displayKey: String
+    ) -> [UInt64]? {
+        guard
+            let displayEntry = monitorEntry(fromStore: store, displayKey: displayKey),
+            let desktopEntries = displayEntry["Spaces"] as? [[String: Any]]
+        else {
+            return nil
+        }
+        return desktopEntries.compactMap { entry -> UInt64? in
+            guard entry["TileLayoutManager"] == nil else { return nil }
+            return (entry["ManagedSpaceID"] as? NSNumber)?.uint64Value
+        }
     }
 
     /// The live monitor entry for `displayKey` — the one carrying a `Spaces` array

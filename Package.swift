@@ -133,6 +133,11 @@ let package = Package(
             path: "Tests/DeskLayouterArrangePlanTests"
         ),
         .executableTarget(
+            name: "DeskLayouterActiveDesktopTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterActiveDesktopTests"
+        ),
+        .executableTarget(
             name: "DeskLayouterArrangeReportTests",
             dependencies: ["DeskLayouterCore"],
             path: "Tests/DeskLayouterArrangeReportTests"

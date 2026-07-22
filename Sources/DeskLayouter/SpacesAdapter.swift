@@ -59,15 +59,18 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
     private let commandRunner: CommandRunning
     private let sessionBindingUpdater: SessionBindingUpdating
     private let displayInventory: DisplayInventoryProviding
+    private let activeSpaceProvider: ActiveSpaceProviding
 
     public init(
         commandRunner: CommandRunning? = nil,
         sessionBindingUpdater: SessionBindingUpdating? = nil,
-        displayInventory: DisplayInventoryProviding? = nil
+        displayInventory: DisplayInventoryProviding? = nil,
+        activeSpaceProvider: ActiveSpaceProviding? = nil
     ) {
         self.commandRunner = commandRunner ?? CommandRunner()
         self.sessionBindingUpdater = sessionBindingUpdater ?? SessionBindingUpdater()
         self.displayInventory = displayInventory ?? CoreGraphicsDisplayInventory()
+        self.activeSpaceProvider = activeSpaceProvider ?? SkyLightActiveSpaceProvider()
     }
 
     public func currentDesktopSnapshot() throws -> DesktopSnapshot {
@@ -88,15 +91,26 @@ public final class MacOSSpacesAdapter: SpacesAdapter {
 
     public func activeDesktopNumber() throws -> Int? {
         // Resolve the sole active logical Display exactly as the snapshot does,
-        // then read the live current Space's position in that Display's ordered
-        // Desktops. A topology that is not a single main Display throws here (as
-        // in `currentDesktopSnapshot()`), so Arrange never guesses against an
-        // ambiguous setup.
+        // then map the LIVE active managed Space ID read from WindowServer to its
+        // position in that Display's ordered Desktops. Reading the live Space
+        // rather than the exported store's `Current Space` (which can lag behind
+        // the session) is the crux of issue #61. A topology that is not a single
+        // main Display throws here (as in `currentDesktopSnapshot()`), so Arrange
+        // never guesses against an ambiguous setup; an unreadable live Space or
+        // one absent from the ordered Desktops resolves to `nil` so Arrange fails
+        // closed rather than treating a wrong Desktop as active.
         let displayKey = try DisplayResolution.activeDisplayKey(
             for: displayInventory.activeDisplays()
         )
+        guard let activeManagedSpaceID = try activeSpaceProvider.activeManagedSpaceID() else {
+            return nil
+        }
         let store = try readStore()
-        return DisplayResolution.activeDesktopNumber(fromStore: store, displayKey: displayKey)
+        return DisplayResolution.desktopNumber(
+            forManagedSpaceID: activeManagedSpaceID,
+            fromStore: store,
+            displayKey: displayKey
+        )
     }
 
     public func apply(

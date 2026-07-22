@@ -30,6 +30,7 @@ test:
 	swift run DeskLayouterDisplayTests
 	swift run DeskLayouterArrangeTests
 	swift run DeskLayouterArrangePlanTests
+	swift run DeskLayouterActiveDesktopTests
 	swift run DeskLayouterArrangeReportTests
 	swift run DeskLayouterDisplayNameTests
 	swift run DeskLayouterMenuBarTests
