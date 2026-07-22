@@ -84,12 +84,37 @@ final class EditorModel: ObservableObject {
     private var presetLibrary: PresetLibrary
     private var selectedApplication: SelectedApplication?
 
-    // Runtime Arrange state (issue #27, ADR-0003). The pure arming policy lives in
-    // `DesktopArrangePlan`; this model owns only the live NSWorkspace observation
-    // that drives it, torn down as soon as the last armed Desktop is arranged so
-    // the app is never a permanent background observer.
-    private var arrangePlan = DesktopArrangePlan()
+    // Runtime Arrange state (issue #27, ADR-0003; settling policy issue #62). The
+    // arming policy and the bounded settling/retry across Desktop transitions live
+    // in `ArrangeTransitionCoordinator`; this model owns only the live NSWorkspace
+    // observation that drives it, torn down as soon as the last armed Desktop is
+    // arranged so the app is never a permanent background observer, and the
+    // scheduler the coordinator retries on.
+    private let transitionScheduler: any TransitionScheduler
     private var spaceChangeObserver: NSObjectProtocol?
+
+    /// Coordinates the runtime Arrange cycle: it holds the arming set and, because
+    /// `activeSpaceDidChangeNotification` fires before the new Desktop's live Space
+    /// and Accessibility windows are ready (issue #62), waits for the transition to
+    /// settle — retrying against the freshly re-resolved live Desktop — before an
+    /// armed Desktop is completed. The live side effects are supplied here as
+    /// closures; the policy itself is exercised deterministically in
+    /// `DeskLayouterTransitionTests`. Built lazily so its closures can capture a
+    /// fully-initialized `self`.
+    private lazy var transitionCoordinator = ArrangeTransitionCoordinator(
+        scheduler: transitionScheduler,
+        resolveActiveDesktop: { [weak self] in self?.liveActiveDesktopNumber() ?? nil },
+        performArrange: { [weak self] desktop in (self?.arrangePass(forDesktop: desktop)) ?? nil },
+        presentReport: { [weak self] report, activeDesktop, pendingDesktops in
+            guard let self else { return }
+            feedback = arrangeFeedback(
+                for: report,
+                activeDesktop: activeDesktop,
+                pendingDesktops: pendingDesktops
+            )
+        },
+        stopObserving: { [weak self] in self?.stopObservingSpaceChanges() }
+    )
 
     /// The latest availability-aware projection of the board against the live
     /// system (issue #52). Core owns the surfacing and Apply-gating rules; this
@@ -103,7 +128,8 @@ final class EditorModel: ObservableObject {
         boardStateStore: BoardStateStore = .default,
         presetLibraryStore: PresetLibraryStore = .default,
         applicationsProvider: any InstalledApplicationsProviding = SystemInstalledApplicationsProvider(),
-        windowArranger: WindowArranger = WindowArranger()
+        windowArranger: WindowArranger = WindowArranger(),
+        transitionScheduler: any TransitionScheduler = MainQueueTransitionScheduler()
     ) {
         self.assignmentPlanner = assignmentPlanner
         self.spacesAdapter = spacesAdapter
@@ -111,6 +137,7 @@ final class EditorModel: ObservableObject {
         self.presetLibraryStore = presetLibraryStore
         self.applicationsProvider = applicationsProvider
         self.windowArranger = windowArranger
+        self.transitionScheduler = transitionScheduler
         // Load the saved board state so the editor reflects both the previously
         // applied Assignments and any edits that were pending at last quit. A
         // missing file loads as an empty board; a read failure falls back to
@@ -428,15 +455,17 @@ final class EditorModel: ObservableObject {
         guard let report = runArrange(activeDesktopApplications) else { return }
 
         // Arm the other Desktops that have Layouts. `activeDesktop` is excluded
-        // because it was just arranged above.
+        // because it was just arranged above. Re-pressing starts a fresh cycle and
+        // invalidates any settling attempt still pending from a previous press
+        // (issue #62).
         let desktopsWithLayouts = Set(
             applications.filter(\.hasValidLayout).map(\.desktopNumber)
         )
-        let outcome = arrangePlan.press(
+        let shouldObserve = transitionCoordinator.press(
             desktopsWithLayouts: desktopsWithLayouts,
             activeDesktop: activeDesktop
         )
-        if outcome.shouldObserve {
+        if shouldObserve {
             startObservingSpaceChanges()
         } else {
             stopObservingSpaceChanges()
@@ -445,8 +474,27 @@ final class EditorModel: ObservableObject {
         feedback = arrangeFeedback(
             for: report,
             activeDesktop: activeDesktop,
-            pendingDesktops: Array(arrangePlan.armedDesktops)
+            pendingDesktops: Array(transitionCoordinator.armedDesktops)
         )
+    }
+
+    /// The live active Desktop number, or `nil` when it cannot be resolved. Wraps
+    /// the throwing adapter read so the coordinator sees a clean optional and
+    /// treats an unresolved read as "unknown" — retried during a transition rather
+    /// than acted on (issue #61, #62).
+    private func liveActiveDesktopNumber() -> Int? {
+        (try? spacesAdapter.activeDesktopNumber()) ?? nil
+    }
+
+    /// Runs one settling Arrange pass scoped to `desktop`'s applications, reusing
+    /// the same engine scoping and error-to-feedback mapping as the immediate
+    /// pass. Returns `nil` when the pass could not run (feedback already set).
+    private func arrangePass(forDesktop desktop: Int) -> ArrangeReport? {
+        let desktopApplications = ArrangeEngine.applications(
+            board.configuration.managedApplications,
+            assignedToDesktop: desktop
+        )
+        return runArrange(desktopApplications)
     }
 
     /// Runs one Arrange pass, translating the engine's thrown errors into
@@ -517,7 +565,10 @@ final class EditorModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.handleActiveSpaceChange()
+                // Hand the notification to the coordinator, which starts a bounded
+                // settling cycle instead of acting synchronously on a transition
+                // that has not settled yet (issue #62).
+                self?.transitionCoordinator.spaceChangeNotified()
             }
         }
     }
@@ -528,36 +579,6 @@ final class EditorModel: ObservableObject {
         if let spaceChangeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
             self.spaceChangeObserver = nil
-        }
-    }
-
-    /// Handles a Space change while arming is active: if the now-active Desktop is
-    /// armed, arrange it once and disarm it; when it was the last armed Desktop,
-    /// stop observing.
-    private func handleActiveSpaceChange() {
-        let activeDesktop = try? spacesAdapter.activeDesktopNumber()
-        switch arrangePlan.desktopBecameActive(activeDesktop) {
-        case .ignore:
-            return
-        case let .arrange(tearDownAfter):
-            // `desktopBecameActive` only returns `.arrange` for a known, armed
-            // Desktop, so `activeDesktop` is non-nil here; scope the pass to that
-            // Desktop's apps so a visited armed Desktop reports only its own apps.
-            guard let activeDesktop else { return }
-            let activeDesktopApplications = ArrangeEngine.applications(
-                board.configuration.managedApplications,
-                assignedToDesktop: activeDesktop
-            )
-            if let report = runArrange(activeDesktopApplications) {
-                feedback = arrangeFeedback(
-                    for: report,
-                    activeDesktop: activeDesktop,
-                    pendingDesktops: Array(arrangePlan.armedDesktops)
-                )
-            }
-            if tearDownAfter {
-                stopObservingSpaceChanges()
-            }
         }
     }
 
