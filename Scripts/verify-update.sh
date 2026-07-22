@@ -143,6 +143,30 @@ stage_version() {
         || die "re-signing failed --verify --strict: $dest"
 }
 
+# Query the SYSTEM TCC store for the bundle's Accessibility authorization.
+# Accessibility lives in the system store; reading it needs this terminal to
+# hold Full Disk Access. Echoes exactly one of:
+#   granted     — an ALLOWED entry exists (auth_value 2 or 3)
+#   absent      — TCC.db is readable but has no allowed entry
+#   unreadable  — TCC.db could not be read (no Full Disk Access)
+tcc_accessibility_state() {
+    local bundle_id="$1"
+    local sys_db="/Library/Application Support/com.apple.TCC/TCC.db"
+    local val
+    # sqlite3 exits 0 with empty output when the row is simply absent, and
+    # non-zero when the DB is unreadable — distinguish those two cases.
+    if val=$(/usr/bin/sqlite3 "$sys_db" \
+        "SELECT auth_value FROM access WHERE service='kTCCServiceAccessibility' AND client='$bundle_id' AND client_type=0 ORDER BY auth_value DESC LIMIT 1;" 2>/dev/null); then
+        if [[ "$val" == "2" || "$val" == "3" ]]; then
+            print "granted"
+        else
+            print "absent"
+        fi
+    else
+        print "unreadable"
+    fi
+}
+
 stop_server() {
     [[ -f "$server_pid_file" ]] || return 0
     local pid
@@ -237,6 +261,32 @@ do_arm() {
     # 2. Stamp N (installed) and N+1 (update target). Same bundle id + identity.
     print "arm: staging version N ($n_short build $n_build) and N+1 ($np1_short build $np1_build)..."
     stage_version "$installed_app" "$n_short" "$n_build" "$feed_url" "$identity"
+
+    # The test copy shares the real bundle id + designated requirement, so a
+    # PRE-EXISTING Accessibility grant (a real install, or a prior run) would make
+    # the test copy trusted BEFORE the update — vacuously "passing" the crux. The
+    # grant this test observes must be the one the operator gives the freshly
+    # installed test copy, so refuse to arm if one already exists. (metadata is
+    # not written yet, so the transactional rollback here does NOT tccutil-reset
+    # the bundle id — it only removes the isolated test dir, leaving the operator's
+    # grant untouched for them to reset deliberately.)
+    local grant_state
+    grant_state=$(tcc_accessibility_state "$bundle_id")
+    if [[ "$grant_state" == "granted" ]]; then
+        print -u2 "arm: REFUSING — '$bundle_id' already has an Accessibility grant."
+        print -u2 "  The test copy shares that bundle id + designated requirement, so a"
+        print -u2 "  pre-existing grant would trust it before the update and make the result"
+        print -u2 "  meaningless. Reset it first, then re-arm:"
+        print -u2 "      tccutil reset Accessibility $bundle_id"
+        print -u2 "      $self arm"
+        exit 1
+    elif [[ "$grant_state" == "unreadable" ]]; then
+        print "arm: WARNING — cannot read the system TCC database (this terminal lacks Full Disk Access)."
+        print "  Ensure NO pre-existing Accessibility grant exists for '$bundle_id' before the"
+        print "  human step (run: tccutil reset Accessibility $bundle_id), otherwise the test"
+        print "  copy may be trusted before the update and the result would be meaningless."
+    fi
+
     stage_version "$np1_app" "$np1_short" "$np1_build" "$feed_url" "$identity"
 
     # 3. Record + assert the designated requirements match (the crux).
@@ -334,20 +384,21 @@ do_arm() {
 
 check_ax_trust() {
     local bundle_id="$1"
-    # Preferred automated signal: the system TCC database. Accessibility lives in
-    # the SYSTEM store; reading it needs this terminal to hold Full Disk Access.
-    local sys_db="/Library/Application Support/com.apple.TCC/TCC.db"
-    local val=""
-    if val=$(/usr/bin/sqlite3 "$sys_db" \
-        "SELECT auth_value FROM access WHERE service='kTCCServiceAccessibility' AND client='$bundle_id' AND client_type=0 ORDER BY auth_value DESC LIMIT 1;" 2>/dev/null) \
-        && [[ -n "$val" ]]; then
-        if [[ "$val" == "2" || "$val" == "3" ]]; then
-            print "  AX-trust: PASS (system TCC.db shows Accessibility ALLOWED for $bundle_id post-update, auth_value=$val)"
+    # Preferred automated signal: the system TCC database (same store the arm-time
+    # pre-existing-grant guard reads). A grant here AFTER the update — combined
+    # with the proven-stable designated requirement — is the crux evidence.
+    local state
+    state=$(tcc_accessibility_state "$bundle_id")
+    case "$state" in
+        granted)
+            print "  AX-trust: PASS (system TCC.db shows Accessibility ALLOWED for $bundle_id post-update)"
             return 0
-        fi
-        print -u2 "  AX-trust: FAIL (system TCC.db shows Accessibility NOT allowed for $bundle_id, auth_value=$val)"
-        return 1
-    fi
+            ;;
+        absent)
+            print -u2 "  AX-trust: FAIL (system TCC.db shows NO Accessibility grant for $bundle_id after the update)"
+            return 1
+            ;;
+    esac
 
     # Fallback: operator confirmation (a shell cannot query another process's
     # AXIsProcessTrusted, and TCC.db is unreadable without Full Disk Access).
@@ -398,16 +449,18 @@ do_verify() {
     if [[ "$cur_short" == "$np1_short" && "$cur_build" == "$np1_build" ]]; then
         print "PASS: installed app is N+1 ($cur_short build $cur_build) — Sparkle applied the update"
     else
-        print -u2 "FAIL: installed app is $cur_short build $cur_build, expected N+1 $np1_short build $np1_build."
-        print -u2 "      The Sparkle update has not been applied yet. Complete the human step:"
-        print -u2 "        1) open '$installed_app'  2) grant Accessibility  3) Check for Updates… ($feed_url)"
-        print -u2 "      then re-run '$self verify'."
-        print ""
-        print "RESULT: FAIL on $(/usr/bin/sw_vers -productVersion) ($(/usr/bin/sw_vers -buildVersion))"
-        print ""
-        print "cleaning up..."
-        do_restore
-        exit 1
+        # The Sparkle update has NOT happened yet — this is not a verdict. PRESERVE
+        # all armed state (do NOT restore, do NOT tccutil-reset), print the human
+        # step, and exit non-zero. Auto-restore fires only once there is a genuine
+        # PASS/FAIL verdict below (i.e. the app really updated to N+1).
+        print -u2 "NOT YET UPDATED: installed app is $cur_short build $cur_build, expected N+1 $np1_short build $np1_build."
+        print -u2 "  The Sparkle update has not been applied. Armed state is PRESERVED (nothing"
+        print -u2 "  removed, TCC grant untouched). Complete the human step, then re-run verify:"
+        print -u2 "    1) open '$installed_app'"
+        print -u2 "    2) grant it Accessibility and confirm Arrange works"
+        print -u2 "    3) menu-bar 'Check for Updates…' ($feed_url), install N+1, let it relaunch"
+        print -u2 "    4) $self verify"
+        exit 2
     fi
 
     # 2. Designated requirement unchanged (fully automated, the crux).
