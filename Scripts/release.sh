@@ -61,25 +61,28 @@ app_bundle="$repo_dir/.build/Desk Layouter.app"
 manifest="$release_dir/manifest.json"
 notes_file="${RELEASE_NOTES_FILE:-$repo_dir/RELEASE_NOTES.md}"
 
-# generate_appcast is vendored by SPM under the Sparkle artifact bundle; resolve
-# it relative to the package rather than hardcoding a brittle absolute path.
-sparkle_bin_dir="$repo_dir/.build/artifacts/sparkle/Sparkle/bin"
-# The SUFeedURL baked into Info.plist by #45 is the single source of truth for
-# where the appcast must be reachable; read it here so the publish and verify
-# stages can never drift from what installed builds actually poll.
-feed_url=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$info_plist")
+die() { print -u2 "release: $1"; exit 1; }
 
 usage() {
     print -u2 "usage: $0 {preflight|build|sign|package|notarize|staple|appcast|publish|verify|verify-local|verify-available|all}"
     exit 2
 }
 
-die() { print -u2 "release: $1"; exit 1; }
+# generate_appcast is vendored by SPM under the Sparkle artifact bundle; resolve
+# it relative to the package rather than hardcoding a brittle absolute path.
+sparkle_bin_dir="$repo_dir/.build/artifacts/sparkle/Sparkle/bin"
+# The SUFeedURL baked into Info.plist by #45 is the single source of truth for
+# where the appcast must be reachable; read it here so the publish and verify
+# stages can never drift from what installed builds actually poll. Fail with a
+# clear message rather than a raw PlistBuddy error if the key is somehow absent.
+feed_url=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$info_plist" 2>/dev/null) \
+    || die "SUFeedURL missing from $info_plist (baked in by #45); cannot resolve the appcast feed"
 
 # CFBundleShortVersionString is the single source of truth for the version; the
 # tag and .dmg name are derived from it so they can never drift (AC: version ==
 # tag). Read the plist once here rather than re-spawning PlistBuddy per use.
-release_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist")
+release_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist" 2>/dev/null) \
+    || die "CFBundleShortVersionString missing from $info_plist"
 release_tag="v$release_version"
 dmg_file="$release_dir/DeskLayouter-$release_version.dmg"
 
@@ -510,7 +513,8 @@ do_verify_available() {
     [[ "$latest_tag" == "$tag" ]] || die "release $tag is not the latest release (latest is '${latest_tag:-none}')"
 
     local urls
-    urls=$(gh release view "$tag" --repo "$repo" --json assets -q '.assets[].url')
+    urls=$(gh release view "$tag" --repo "$repo" --json assets -q '.assets[].url' 2>/dev/null) \
+        || die "could not read assets for release $tag on $repo"
     [[ -n "$urls" ]] || die "release $tag has no assets"
 
     local failed=0 url code
