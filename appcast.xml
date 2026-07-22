@@ -3,6 +3,14 @@
     <channel>
         <title>Desk Layouter</title>
         <item>
+            <title>0.3.0</title>
+            <pubDate>Wed, 22 Jul 2026 22:35:54 +0200</pubDate>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Taimonania/desk-layouter/releases/download/v0.3.0/DeskLayouter-0.3.0.zip" length="3097790" type="application/octet-stream" sparkle:edSignature="rBEPWnsbLgLAx0kVyScrISadO/6uG5DpUpVdx/sYfyv+2a/EnATlY290+N3y+9N0jfbfWgHbDeGYiN3tqmrSCw=="/>
+        </item>
+        <item>
             <title>0.2.1</title>
             <pubDate>Wed, 22 Jul 2026 16:55:23 +0200</pubDate>
             <sparkle:version>4</sparkle:version>
@@ -17,14 +25,6 @@
             <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/Taimonania/desk-layouter/releases/download/v0.2.0/DeskLayouter-0.2.0.zip" length="2621508" type="application/octet-stream" sparkle:edSignature="yGwLbGgPzarVVxsfhKi2Ixy07qTmiz+F9X3S6zC1XRINqmFsjS6QYKgNnQdUH3EqS+w5QcKaHnFdZMr/I11fBw=="/>
-        </item>
-        <item>
-            <title>0.1.1</title>
-            <pubDate>Wed, 22 Jul 2026 08:24:31 +0200</pubDate>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Taimonania/desk-layouter/releases/download/v0.1.1/DeskLayouter-0.1.1.zip" length="2113453" type="application/octet-stream" sparkle:edSignature="h2joye/XoM2ZsHafyo04IMRAMm3oD/iLLxO9+DlO8ozfqiE89Hjj0qYvDKsP8/ipEicIh+eRo49ip/OkBVdsBg=="/>
         </item>
     </channel>
 </rss>
