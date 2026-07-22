@@ -1,4 +1,4 @@
-.PHONY: build run relaunch test test-desktop-placement \
+.PHONY: build run relaunch test test-desktop-placement benchmark-picker \
 	session-boundary-arm session-boundary-verify session-boundary-restore \
 	update-arm update-verify update-restore \
 	release release-preflight release-appcast verify-release
@@ -45,6 +45,11 @@ test:
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh
+
+# Repeatable input-to-results diagnostic for issue #89. It measures in-memory
+# filtering, row presentation, and icon lookup separately over a 240-app catalog.
+benchmark-picker:
+	swift run -c release DeskLayouterPickerBenchmark
 
 # Two-phase, human-gated session-boundary compatibility harness (issue #8).
 # Run `arm`, then log out / reboot yourself, then `verify` from a different

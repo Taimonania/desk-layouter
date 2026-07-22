@@ -1,7 +1,33 @@
+import AppKit
 import DeskLayouterCore
+import DeskLayouterMacOS
+
+@MainActor
+private final class CountingApplicationsProvider: InstalledApplicationsProviding {
+    let catalog: [InstalledApplication]
+    let icon: NSImage?
+    private(set) var applicationsCallCount = 0
+    private(set) var iconCallCount = 0
+
+    init(catalog: [InstalledApplication], icon: NSImage?) {
+        self.catalog = catalog
+        self.icon = icon
+    }
+
+    func applications() -> [InstalledApplication] {
+        applicationsCallCount += 1
+        return catalog
+    }
+
+    func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
+        iconCallCount += 1
+        return icon
+    }
+}
 
 @main
 struct ApplicationCatalogTestRunner {
+    @MainActor
     static func main() {
         var failures: [String] = []
 
@@ -114,6 +140,61 @@ struct ApplicationCatalogTestRunner {
                 "filter matches name case-insensitively",
                 filtered.map(\.displayName) == ["Mail", "Messages"],
                 "got \(filtered.map(\.displayName))"
+            )
+        }
+
+        // Performance regression: catalog discovery and icon resolution are
+        // initial-load work. Searching a representative 240-app catalog must not
+        // invoke either side-effectful provider operation per keystroke.
+        do {
+            let apps = (0..<240).map { index in
+                app(
+                    String(format: "Representative Application %03d.app", index),
+                    "com.example.representative.\(index)",
+                    running: index.isMultiple(of: 3)
+                )
+            }
+            let provider = CountingApplicationsProvider(
+                catalog: apps,
+                icon: NSImage(size: NSSize(width: 20, height: 20))
+            )
+            let store = ApplicationPickerStore(provider: provider)
+            store.refresh()
+
+            let queries = ["r", "re", "rep", "representative", "application 1"]
+            for query in queries {
+                let matches = ApplicationCatalog.filtered(store.applications, searchText: query)
+                for application in matches.prefix(6) {
+                    _ = application.presentedName
+                    _ = store.icon(forBundleIdentifier: application.bundleIdentifier)
+                }
+            }
+
+            check(
+                "search keystrokes do not rediscover the application catalog",
+                provider.applicationsCallCount == 1,
+                "catalog discovery ran \(provider.applicationsCallCount) times"
+            )
+            check(
+                "search keystrokes reuse icons resolved during initial catalog load",
+                provider.iconCallCount == apps.count,
+                "icon resolution ran \(provider.iconCallCount) times for \(apps.count) apps"
+            )
+        }
+
+        // Negative icon results are cached as well: an uninstalled app must not
+        // trigger a repeated NSWorkspace lookup every time SwiftUI evaluates a row.
+        do {
+            let missing = app("Missing App", "com.example.missing")
+            let provider = CountingApplicationsProvider(catalog: [missing], icon: nil)
+            let store = ApplicationPickerStore(provider: provider)
+            store.refresh()
+            _ = store.icon(forBundleIdentifier: missing.bundleIdentifier)
+            _ = store.icon(forBundleIdentifier: missing.bundleIdentifier)
+            check(
+                "missing application icons are negatively cached",
+                provider.iconCallCount == 1,
+                "missing icon was resolved \(provider.iconCallCount) times"
             )
         }
 

@@ -10,6 +10,7 @@ import Foundation
 /// `NSWorkspace.shared.runningApplications`. Injecting a fabricated conforming
 /// type lets the model be driven without touching the real system; the pure
 /// merge/filter logic lives in `ApplicationCatalog` in Core.
+@MainActor
 public protocol InstalledApplicationsProviding {
     /// The installed applications merged with the currently-running set, sorted
     /// and deduplicated for display.
@@ -19,6 +20,63 @@ public protocol InstalledApplicationsProviding {
     /// located, so the board can show each card with its own icon. Returns `nil`
     /// when no matching application is installed.
     func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage?
+}
+
+/// Owns the application picker's loaded catalog and icon snapshot.
+///
+/// Catalog discovery and icon lookup can both cross into macOS services. Those
+/// operations belong to an explicit refresh, not the search-text path: once a
+/// snapshot is loaded, each keystroke performs only in-memory filtering and
+/// reads already-resolved icons. Missing icons are cached too, avoiding repeated
+/// `NSWorkspace` lookups for stale or synthetic bundle identifiers.
+@MainActor
+public final class ApplicationPickerStore {
+    public private(set) var applications: [InstalledApplication] = []
+
+    private let provider: any InstalledApplicationsProviding
+    private var iconsByBundleIdentifier: [String: NSImage] = [:]
+    private var bundleIdentifiersWithoutIcons: Set<String> = []
+
+    public init(provider: any InstalledApplicationsProviding) {
+        self.provider = provider
+    }
+
+    /// Rebuilds the snapshot. This is the only operation that discovers the
+    /// catalog; icon resolution is deliberately included in the initial load so
+    /// it cannot consume the picker's per-keystroke frame budget later.
+    public func refresh() {
+        let loadedApplications = provider.applications()
+        applications = loadedApplications
+        iconsByBundleIdentifier.removeAll(keepingCapacity: true)
+        bundleIdentifiersWithoutIcons.removeAll(keepingCapacity: true)
+
+        for application in loadedApplications {
+            _ = resolveIconIfNeeded(forBundleIdentifier: application.bundleIdentifier)
+        }
+    }
+
+    /// Returns an icon from the loaded snapshot. Bundle identifiers outside the
+    /// discovered catalog (for example an Assignment for an uninstalled app) are
+    /// resolved once on demand, then cached with the same positive/negative rule.
+    public func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
+        resolveIconIfNeeded(forBundleIdentifier: bundleIdentifier)
+    }
+
+    private func resolveIconIfNeeded(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
+        if let icon = iconsByBundleIdentifier[bundleIdentifier] {
+            return icon
+        }
+        if bundleIdentifiersWithoutIcons.contains(bundleIdentifier) {
+            return nil
+        }
+
+        guard let icon = provider.icon(forBundleIdentifier: bundleIdentifier) else {
+            bundleIdentifiersWithoutIcons.insert(bundleIdentifier)
+            return nil
+        }
+        iconsByBundleIdentifier[bundleIdentifier] = icon
+        return icon
+    }
 }
 
 /// The production provider: enumerates application bundles in `/Applications`
