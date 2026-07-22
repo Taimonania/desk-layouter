@@ -10,64 +10,90 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var model: AppRootModel
 
+    /// Layout constants for the hand-rolled settings column (issue #98).
+    private enum Metrics {
+        /// Caps the content as a stable left-aligned column so widening the
+        /// window never reflows or stretches rows and captions.
+        static let columnWidth: CGFloat = 560
+        /// Generous gap that reads the Updates and Support blocks as separate.
+        static let sectionSpacing: CGFloat = 30
+        /// Tight grouping between a section's header, control, and caption.
+        static let groupSpacing: CGFloat = 6
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Settings")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer(minLength: 0)
-                Button("Done") {
-                    model.showBoard()
-                }
-                .keyboardShortcut(.defaultAction)
-                .help("Return to the board")
-                .accessibilityLabel("Done, return to the board")
+        VStack(alignment: .leading, spacing: 20) {
+            header
+
+            VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+                updatesSection
+                supportSection
             }
-
-            Form {
-                Section("Updates") {
-                    Picker(
-                        "Software updates",
-                        selection: Binding(
-                            get: { model.automaticallyInstallUpdates },
-                            set: { model.automaticallyInstallUpdates = $0 }
-                        )
-                    ) {
-                        Text("Ask before installing").tag(false)
-                        Text("Automatically install updates").tag(true)
-                    }
-                    .pickerStyle(.radioGroup)
-                    .accessibilityLabel("Software update installation")
-
-                    Text("Desk Layouter always checks for updates automatically. This setting only controls whether an available update installs on its own. Changes take effect the next time you launch Desk Layouter.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Section("Support") {
-                    Button("Report a Problem") {
-                        NSWorkspace.shared.open(
-                            SupportReport.githubIssueURL(
-                                appVersion: AppVersion.current(),
-                                macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString
-                            )
-                        )
-                    }
-                    .accessibilityHint("Opens a prefilled GitHub issue in your browser")
-
-                    Text("Opens a prefilled GitHub issue requesting your Desk Layouter version, macOS version, expected behavior, and actual behavior.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            .frame(maxWidth: Metrics.columnWidth, alignment: .leading)
 
             Spacer(minLength: 0)
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: AppWindowConfiguration.minWidth, minHeight: AppWindowConfiguration.minHeight)
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Settings")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Spacer(minLength: 0)
+            Button("Done") {
+                model.showBoard()
+            }
+            .keyboardShortcut(.defaultAction)
+            .help("Return to the board")
+            .accessibilityLabel("Done, return to the board")
+        }
+    }
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: Metrics.groupSpacing) {
+            Text("Updates")
+                .font(.headline)
+
+            Toggle(
+                "Automatically install updates",
+                isOn: Binding(
+                    get: { model.automaticallyInstallUpdates },
+                    set: { model.automaticallyInstallUpdates = $0 }
+                )
+            )
+            .toggleStyle(.switch)
+            .fixedSize()
+
+            Text("Desk Layouter always checks for updates automatically. This setting only controls whether an available update installs on its own. When it's off, you'll be asked before installing. Changes take effect the next time you launch Desk Layouter.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var supportSection: some View {
+        VStack(alignment: .leading, spacing: Metrics.groupSpacing) {
+            Text("Support")
+                .font(.headline)
+
+            Button("Report a Problem") {
+                NSWorkspace.shared.open(
+                    SupportReport.githubIssueURL(
+                        appVersion: AppVersion.current(),
+                        macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                    )
+                )
+            }
+            .accessibilityHint("Opens a prefilled GitHub issue in your browser")
+
+            Text("Opens a prefilled GitHub issue requesting your Desk Layouter version, macOS version, expected behavior, and actual behavior.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
