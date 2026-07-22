@@ -6,6 +6,10 @@ highlights (newest first). The app bundles this file and shows the newest
 highlights on the first launch after an upgrade (the What's-New screen); the
 release pipeline derives each GitHub release's notes from the matching section.
 
+## 0.2.1 — 2026-07-22
+
+- The editor now groups Apply and Arrange together, aligns Preset controls consistently, and keeps hover tooltips fully visible at window edges.
+
 ## 0.2.0 — 2026-07-22
 
 - Arrange now targets only applications assigned to the live active Desktop, avoiding stale Desktop information and leaving other Desktops untouched.
