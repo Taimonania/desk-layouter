@@ -944,10 +944,9 @@ struct EditorView: View {
             let widths = EditorChromeLayout.footerActionWidths(buttonWidth: footerActionButtonWidth)
             HStack(spacing: EditorChromeLayout.footerActionSpacing) {
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
-                    footerAction(action)
-                        // Before the widest label has been measured, fall back to
-                        // intrinsic sizing so the buttons never collapse to zero.
-                        .frame(width: widths[index] > 0 ? widths[index] : nil)
+                    // Before the widest label has been measured, `width` is nil and
+                    // the buttons fall back to intrinsic sizing so they never collapse.
+                    footerAction(action, width: widths[index] > 0 ? widths[index] : nil)
                 }
             }
             .background(footerActionWidthProbe)
@@ -963,23 +962,32 @@ struct EditorView: View {
         }
     }
 
+    /// Renders one footer action button. When `width` is set (the measured widest
+    /// label), the button's label fills that width so the *rendered* button — not
+    /// just its layout slot — is the equal, count-stable size the design calls for.
     @ViewBuilder
-    private func footerAction(_ action: EditorChromeLayout.FooterAction) -> some View {
+    private func footerAction(_ action: EditorChromeLayout.FooterAction, width: CGFloat?) -> some View {
         switch action {
         case .apply:
-            Button(applyTitle) {
+            Button {
                 model.apply()
+            } label: {
+                Text(applyTitle).frame(maxWidth: width == nil ? nil : .infinity)
             }
             .keyboardShortcut(.defaultAction)
             .disabled(!model.canApply)
+            .frame(width: width)
             .welcomeAnchor(.applyButton)
         case .arrange:
             // Arrange enacts Layouts on live windows and stays independent of
             // Apply's pending-Assignment gate.
-            Button("Arrange") {
+            Button {
                 model.arrange()
+            } label: {
+                Text("Arrange").frame(maxWidth: width == nil ? nil : .infinity)
             }
             .disabled(!model.canArrange)
+            .frame(width: width)
             .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
             .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
             .welcomeAnchor(.arrangeButton)
