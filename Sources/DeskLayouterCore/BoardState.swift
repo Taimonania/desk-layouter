@@ -102,12 +102,12 @@ public struct BoardState: Codable, Equatable, Sendable {
     public private(set) var appliedBaseline: [String: Int]
 
     /// The identity of the ``Preset`` this working copy was loaded from (or saved
-    /// as), or `nil` when the working copy is not tied to any saved Preset — a
-    /// board that has never been saved, or a migrated existing installation, which
-    /// the editor header shows as "Custom Setup". It is persisted so the working
-    /// copy's selected-Preset association survives quitting and relaunching, and
-    /// editing the working copy never clears it — the Preset itself only changes
-    /// when the user explicitly updates it.
+    /// as). The optional representation exists only for backward-compatible
+    /// decoding of state written before Presets; launch reconciliation seeds and
+    /// associates a real Preset before the editor uses the board. It is persisted
+    /// so the association survives quitting and relaunching, and editing the
+    /// working copy never clears it — the Preset itself only changes when the user
+    /// explicitly updates it.
     public private(set) var selectedPresetID: UUID?
 
     /// Creates a board state. When no explicit baseline is supplied the working
@@ -132,8 +132,8 @@ public struct BoardState: Codable, Equatable, Sendable {
 
     // Tolerant decoding: a persisted state written before pending-state tracking
     // (or hand-authored without a baseline) loads as clean rather than falsely
-    // dirty, and one written before Presets existed loads with no selected Preset
-    // (shown as "Custom Setup") — the migration path for existing installations.
+    // dirty. One written before Presets existed temporarily decodes without a
+    // selection; launch reconciliation repairs it from the preserved working board.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let configuration = try container.decode(
@@ -275,7 +275,7 @@ public struct BoardState: Codable, Equatable, Sendable {
     /// pending state is ignored.
     public mutating func load(
         configuration newConfiguration: DeskLayouterConfiguration,
-        selectedPresetID: UUID?
+        selectedPresetID: UUID
     ) {
         let managed = Set(newConfiguration.managedApplications.map(\.bundleIdentifier))
         let removals = appliedBaseline.keys.filter { !managed.contains($0) }.sorted()
@@ -286,11 +286,10 @@ public struct BoardState: Codable, Equatable, Sendable {
         self.selectedPresetID = selectedPresetID
     }
 
-    /// Associates the current working copy with a saved Preset (or with none,
-    /// showing "Custom Setup"), without touching the working configuration or the
-    /// applied baseline. Used after saving the current board as a new Preset so
-    /// the header reflects the association.
-    public mutating func associateSelectedPreset(_ id: UUID?) {
+    /// Associates the current working copy with a saved Preset without touching
+    /// the working configuration or applied baseline. Used after saving the
+    /// current board and during launch reconciliation.
+    public mutating func associateSelectedPreset(_ id: UUID) {
         selectedPresetID = id
     }
 

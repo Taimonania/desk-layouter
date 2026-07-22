@@ -131,17 +131,6 @@ struct PresetTestRunner {
             check("updating an unknown id changes nothing", library == before)
         }
 
-        // Selection label: a resolvable selected id reads as the Preset's name; an
-        // absent or dangling selection reads as "Custom Setup" — the label an
-        // existing installation shows after migration, with no Preset created.
-        do {
-            var library = PresetLibrary()
-            let work = try! library.add(name: "Work", managedApplications: [])
-            check("a resolvable selection shows the Preset name", PresetSelection.displayName(for: work.id, in: library) == "Work")
-            check("an absent selection shows Custom Setup", PresetSelection.displayName(for: nil, in: library) == "Custom Setup")
-            check("a dangling selection shows Custom Setup", PresetSelection.displayName(for: UUID(), in: library) == "Custom Setup")
-        }
-
         // Serialization compatibility: a library round-trips through JSON so
         // Presets and their captured Layouts survive relaunch, and a document
         // without a `presets` key decodes as empty rather than failing.
@@ -220,11 +209,11 @@ struct PresetTestRunner {
                 library.isModified(config([base[0]]), from: work.id)
             )
             check(
-                "a nil selection (Custom Setup) is never modified relative to a Preset",
+                "a legacy nil selection is not modified relative to a Preset before reconciliation",
                 library.isModified(config(base), from: nil) == false
             )
             check(
-                "a dangling selection (Custom Setup) is never modified relative to a Preset",
+                "a legacy dangling selection is not modified relative to a Preset before reconciliation",
                 library.isModified(config(base), from: UUID()) == false
             )
         }
@@ -336,15 +325,13 @@ struct PresetTestRunner {
             check("deleting an unknown id changes nothing", library == before)
         }
 
-        // Delete to empty: deleting the last Preset yields an empty library that
-        // still round-trips (relaunch persistence of an empty library).
+        // Delete last: the library refuses to reach zero Presets.
         do {
             var library = PresetLibrary()
             let only = try! library.add(name: "Only", managedApplications: [])
-            _ = library.delete(id: only.id)
-            check("deleting the last Preset empties the library", library.presets.isEmpty)
-            let decoded = try? PresetLibrarySerialization.decode(from: PresetLibrarySerialization.encode(library))
-            check("an emptied library round-trips through serialization", decoded == PresetLibrary(), "got \(String(describing: decoded))")
+            let removed = library.delete(id: only.id)
+            check("deleting the last Preset is blocked", removed == nil)
+            check("the last Preset remains intact", library.presets == [only])
         }
 
         // Relaunch persistence of a rename/delete: the mutated library survives a

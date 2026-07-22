@@ -68,9 +68,9 @@ final class EditorModel: ObservableObject {
     @Published private(set) var feedback: EditorFeedback = .none
 
     // Presets: the ordered library shown in the header selector, and the working
-    // copy's current selected-Preset association (nil reads as "Custom Setup").
+    // copy's required selected-Preset association.
     @Published private(set) var presets: [Preset] = []
-    @Published private(set) var selectedPresetID: UUID?
+    @Published private(set) var selectedPresetID: UUID
     @Published var pendingPresetSwitch: PendingPresetSwitch?
     @Published var pendingPresetDeletion: PendingPresetDeletion?
 
@@ -138,15 +138,16 @@ final class EditorModel: ObservableObject {
         self.applicationsProvider = applicationsProvider
         self.windowArranger = windowArranger
         self.transitionScheduler = transitionScheduler
-        // Load the saved board state so the editor reflects both the previously
-        // applied Assignments and any edits that were pending at last quit. A
-        // missing file loads as an empty board; a read failure falls back to
-        // empty rather than blocking launch.
-        board = (try? boardStateStore.load()) ?? BoardState()
-        // Load the saved Presets. A missing file, or a read failure, degrades to
-        // an empty library rather than blocking launch — the board is unaffected.
-        presetLibrary = (try? presetLibraryStore.load()) ?? PresetLibrary()
-        selectedPresetID = board.selectedPresetID
+        // Load the board and library as one reconciled session. A missing or
+        // legacy association seeds a real Preset from the untouched working board;
+        // read/write failures remain best-effort and never block launch.
+        let session = PresetStartup.load(
+            boardStateStore: boardStateStore,
+            presetLibraryStore: presetLibraryStore
+        )
+        board = session.board
+        presetLibrary = session.library
+        selectedPresetID = session.selectedPresetID
         refreshPresets()
         refreshProjection()
     }
@@ -584,29 +585,26 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Presets
 
-    /// The name to show for the current Preset selection in the header: the
-    /// selected Preset's name, or "Custom Setup" when the working copy is not tied
-    /// to any saved Preset (a fresh or migrated board).
+    /// The real Preset name to show for the current selection in the header.
     var presetSelectionName: String {
-        PresetSelection.displayName(for: selectedPresetID, in: presetLibrary)
+        presetLibrary.preset(for: selectedPresetID)?.name ?? ""
     }
 
     /// True when a Preset is selected, so the explicit "Update Preset" action has
     /// a target. With no selection there is nothing to update — the user saves a
     /// new Preset instead.
     var canUpdateSelectedPreset: Bool {
-        selectedPresetID.flatMap { presetLibrary.preset(for: $0) } != nil
+        presetLibrary.preset(for: selectedPresetID) != nil
     }
 
     /// True when a resolvable Preset is selected, so the header's Rename action has
-    /// a target. With no selection (a Custom Setup working copy) there is nothing
-    /// to rename.
+    /// a target.
     var canRenameSelectedPreset: Bool { canUpdateSelectedPreset }
 
-    /// True when a resolvable Preset is selected, so the header's Delete action has
-    /// a target. Deleting operates on the selected Preset; a Custom Setup working
-    /// copy has no saved Preset to delete.
-    var canDeleteSelectedPreset: Bool { canUpdateSelectedPreset }
+    /// True when the selected Preset can be deleted without emptying the library.
+    var canDeleteSelectedPreset: Bool {
+        canUpdateSelectedPreset && presetLibrary.presets.count > 1
+    }
 
     /// Saves the current working board as a new Preset under the given name,
     /// capturing every managed application, its Assignment, and its optional
@@ -681,8 +679,7 @@ final class EditorModel: ObservableObject {
     func confirmUpdateAndSwitch() {
         guard
             let pending = pendingPresetSwitch,
-            let currentID = selectedPresetID,
-            let current = presetLibrary.preset(for: currentID)
+            let current = presetLibrary.preset(for: selectedPresetID)
         else {
             pendingPresetSwitch = nil
             return
@@ -690,14 +687,14 @@ final class EditorModel: ObservableObject {
         do {
             let result = try PresetSwitch.updateAndSwitch(
                 target: pending.targetID,
-                currentSelection: currentID,
+                currentSelection: selectedPresetID,
                 library: presetLibrary,
                 board: board,
                 persist: { try presetLibraryStore.save($0) }
             )
             presetLibrary = result.library
             board = result.board
-            selectedPresetID = board.selectedPresetID
+            selectedPresetID = board.selectedPresetID ?? selectedPresetID
             refreshPresets()
             pendingPresetSwitch = nil
             do {
@@ -751,12 +748,12 @@ final class EditorModel: ObservableObject {
     /// Preset untouched until the user asks for this. With no Preset selected there
     /// is nothing to update.
     func updateSelectedPreset() {
-        guard let id = selectedPresetID, let existing = presetLibrary.preset(for: id) else {
+        guard let existing = presetLibrary.preset(for: selectedPresetID) else {
             feedback = .info("Select a Preset to update, or save the board as a new Preset.")
             return
         }
         var updatedLibrary = presetLibrary
-        updatedLibrary.update(id: id, managedApplications: board.configuration.managedApplications)
+        updatedLibrary.update(id: selectedPresetID, managedApplications: board.configuration.managedApplications)
         do {
             try presetLibraryStore.save(updatedLibrary)
             presetLibrary = updatedLibrary
@@ -776,18 +773,18 @@ final class EditorModel: ObservableObject {
     /// touches the working board — the association is by identity.
     @discardableResult
     func renameSelectedPreset(to name: String) -> String? {
-        guard let id = selectedPresetID, presetLibrary.preset(for: id) != nil else {
+        guard presetLibrary.preset(for: selectedPresetID) != nil else {
             return "Select a Preset to rename."
         }
         do {
             presetLibrary = try PresetEditing.rename(
-                id: id,
+                id: selectedPresetID,
                 to: name,
                 library: presetLibrary,
                 persist: { try presetLibraryStore.save($0) }
             )
             refreshPresets()
-            let newName = presetLibrary.preset(for: id)?.name ?? name
+            let newName = presetLibrary.preset(for: selectedPresetID)?.name ?? name
             feedback = .success("Renamed the Preset to \"\(newName)\".")
             return nil
         } catch let error as PresetNameError {
@@ -801,12 +798,16 @@ final class EditorModel: ObservableObject {
     /// will be deleted. Deleting is never immediate — it always routes through this
     /// explicit confirmation. With no Preset selected there is nothing to delete.
     func requestDeleteSelectedPreset() {
-        guard let id = selectedPresetID, let preset = presetLibrary.preset(for: id) else {
+        guard canDeleteSelectedPreset else {
+            feedback = .info("Keep at least one Preset.")
+            return
+        }
+        guard let preset = presetLibrary.preset(for: selectedPresetID) else {
             feedback = .info("Select a Preset to delete.")
             return
         }
         pendingPresetDeletion = PendingPresetDeletion(
-            presetID: id,
+            presetID: selectedPresetID,
             presetName: preset.name
         )
     }
@@ -815,9 +816,8 @@ final class EditorModel: ObservableObject {
     /// Preset removed before the change is committed in memory, so a disk failure
     /// prevents the delete and reports it, losing neither the Preset nor the
     /// working board. Deleting the selected Preset preserves its loaded working
-    /// board and re-labels it "Custom Setup"; deleting an unselected Preset leaves
-    /// the working board and selection unchanged. This never Applies or Arranges
-    /// and never alters the applied baseline.
+    /// board and associates it with a remaining Preset. This never Applies or
+    /// Arranges and never alters the applied baseline.
     func confirmDeletePreset() {
         guard let pending = pendingPresetDeletion, let existing = presetLibrary.preset(for: pending.presetID) else {
             pendingPresetDeletion = nil
@@ -834,22 +834,21 @@ final class EditorModel: ObservableObject {
             )
             presetLibrary = result.library
             board = result.board
-            selectedPresetID = board.selectedPresetID
+            selectedPresetID = board.selectedPresetID ?? selectedPresetID
             refreshPresets()
             pendingPresetDeletion = nil
             guard wasSelected else {
                 feedback = .success("Deleted Preset \"\(existing.name)\".")
                 return
             }
-            // The board's association changed to Custom Setup; persist it so the
-            // change survives relaunch. The delete itself already succeeded, so a
-            // board-write failure is reported but does not undo it — the working
-            // board is intact in memory and its on-disk association resolves to
-            // Custom Setup either way now that the Preset is gone.
+            // Persist the replacement association so it survives relaunch. The
+            // delete itself already succeeded, so a board-write failure is
+            // reported but does not undo it; the next launch repairs any dangling
+            // on-disk identity from the preserved working board.
             do {
                 try boardStateStore.save(board)
                 refreshProjection()
-                feedback = .success("Deleted Preset \"\(existing.name)\". This board is now Custom Setup.")
+                feedback = .success("Deleted Preset \"\(existing.name)\". This board is now associated with \"\(presetSelectionName)\".")
             } catch {
                 refreshProjection()
                 feedback = .failure("Deleted Preset \"\(existing.name)\", but could not store the board: \(error.localizedDescription)")

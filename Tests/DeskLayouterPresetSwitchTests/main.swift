@@ -45,10 +45,10 @@ struct PresetSwitchTestRunner {
                 "an unchanged working copy switches immediately",
                 PresetSwitch.decide(target: play.id, currentSelection: work.id, configuration: clean.configuration, library: library) == .switchImmediately
             )
-            let custom = BoardState(configuration: DeskLayouterConfiguration(managedApplications: modifiedApps), selectedPresetID: nil)
+            let legacyUnassociated = BoardState(configuration: DeskLayouterConfiguration(managedApplications: modifiedApps), selectedPresetID: nil)
             check(
-                "a Custom Setup working copy switches immediately",
-                PresetSwitch.decide(target: play.id, currentSelection: nil, configuration: custom.configuration, library: library) == .switchImmediately
+                "a legacy unassociated working copy switches immediately before startup reconciliation",
+                PresetSwitch.decide(target: play.id, currentSelection: nil, configuration: legacyUnassociated.configuration, library: library) == .switchImmediately
             )
             let modified = BoardState(configuration: DeskLayouterConfiguration(managedApplications: modifiedApps), selectedPresetID: work.id)
             check(

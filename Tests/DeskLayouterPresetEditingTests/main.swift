@@ -103,9 +103,9 @@ struct PresetEditingTestRunner {
 
         // MARK: - Delete (selected)
 
-        // Deleting the selected Preset: removes it, changes the board's association
-        // to Custom Setup, preserves the working configuration AND the applied
-        // baseline, and leaves other Presets untouched.
+        // Deleting the selected Preset: removes it, associates the unchanged board
+        // with the remaining Preset, preserves the working configuration AND the
+        // applied baseline, and leaves the remaining snapshot untouched.
         do {
             let (library, work, play) = freshLibrary()
             let baseline = ["com.baseline.App": 7]
@@ -125,7 +125,7 @@ struct PresetEditingTestRunner {
             check("deleting the selected Preset succeeds", result != nil)
             check("deleting the selected Preset removes it from the library", result?.library.preset(for: work.id) == nil)
             check("deleting the selected Preset persists the reduced library before committing", persisted?.preset(for: work.id) == nil && persisted?.preset(for: play.id) != nil)
-            check("deleting the selected Preset changes the association to Custom Setup", result?.board.selectedPresetID == nil)
+            check("deleting the selected Preset selects the remaining Preset", result?.board.selectedPresetID == play.id)
             check(
                 "deleting the selected Preset preserves the working configuration",
                 result?.board.configuration.managedApplications == workApps
@@ -161,14 +161,29 @@ struct PresetEditingTestRunner {
             check("deleting an unselected Preset leaves the selection unchanged", result?.board.selectedPresetID == work.id)
         }
 
-        // A dangling/nil selection: deleting any Preset while the board is already
-        // Custom Setup leaves the board untouched.
+        // The sole remaining Preset is blocked before persistence and neither the
+        // board nor library changes.
         do {
-            let (library, work, _) = freshLibrary()
-            let board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: playApps), selectedPresetID: nil)
-            let result = try? PresetEditing.delete(id: work.id, currentSelection: nil, library: library, board: board, persist: { _ in })
-            check("deleting while Custom Setup leaves the board untouched", result?.board == board)
-            check("deleting while Custom Setup still removes the Preset", result?.library.preset(for: work.id) == nil)
+            var library = PresetLibrary()
+            let only = try! library.add(name: "Only", managedApplications: workApps)
+            let board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: workApps), selectedPresetID: only.id)
+            var persisted = false
+            var thrown: PresetDeletionError?
+            do {
+                _ = try PresetEditing.delete(
+                    id: only.id,
+                    currentSelection: only.id,
+                    library: library,
+                    board: board,
+                    persist: { _ in persisted = true }
+                )
+            } catch let error as PresetDeletionError {
+                thrown = error
+            } catch {}
+            check("deleting the sole Preset is rejected", thrown == .lastPreset)
+            check("a blocked final delete never persists", !persisted)
+            check("a blocked final delete leaves the Preset intact", library.preset(for: only.id) == only)
+            check("a blocked final delete leaves the board intact", board.selectedPresetID == only.id)
         }
 
         // MARK: - Delete persistence failure
