@@ -16,6 +16,10 @@ _Avoid_: Space (the internal/API term), Screen, Monitor.
 A persistent rule that a given application should open on a specific Desktop. Once written, macOS itself enforces it at launch and at login — the app does not move windows at runtime.
 _Avoid_: Binding (the internal `com.apple.spaces` plist term), mapping, rule.
 
+**Preset**:
+A named, persistent snapshot of the complete editable board, including every managed application's Assignment and optional Layout. Loading creates a working copy without enacting it; later edits change the Preset only when the user explicitly updates it, while Apply and Arrange remain separate actions.
+_Avoid_: Profile, template, configuration.
+
 **Apply**:
 Writing the current Assignments into macOS's Spaces store and restarting the Dock so they take effect.
 _Avoid_: Sync, save, flush.
