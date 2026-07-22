@@ -1,7 +1,7 @@
 .PHONY: build run relaunch test test-desktop-placement benchmark-picker \
 	session-boundary-arm session-boundary-verify session-boundary-restore \
 	update-arm update-verify update-restore \
-	release release-preflight release-appcast verify-release
+	release release-preflight release-notes release-appcast verify-release
 
 build:
 	./Scripts/build-app.sh
@@ -79,7 +79,9 @@ update-restore:
 	./Scripts/verify-update.sh restore
 
 # Release pipeline (issues #44, #46). `release-preflight` checks tools +
-# credentials and publishes nothing. `release` builds → signs → notarizes →
+# credentials and publishes nothing. `release-notes` prints the exact GitHub
+# release notes for the current version (for review before publishing) and
+# publishes nothing. `release` builds → signs → notarizes →
 # staples → generates the EdDSA-signed Sparkle appcast locally; it publishes to
 # GitHub Releases and deploys the appcast to GitHub Pages only when
 # RELEASE_PUBLISH=1. `release-appcast` runs just the zip+appcast stage against an
@@ -90,6 +92,9 @@ update-restore:
 # docs/releasing.md.
 release-preflight:
 	./Scripts/release.sh preflight
+
+release-notes:
+	@./Scripts/release.sh notes
 
 release:
 	./Scripts/release.sh all

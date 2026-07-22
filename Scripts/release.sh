@@ -25,6 +25,10 @@ set -eu
 #   appcast           Zip the signed/stapled .app for Sparkle and generate an
 #                     EdDSA-signed appcast.xml pointing at the Release download
 #                     URLs. Signs but publishes nothing.
+#   notes             Print the exact GitHub release notes for this version to
+#                     stdout (Highlights from CHANGELOG.md + the static Notes
+#                     footer). Builds and publishes nothing — the review artifact
+#                     to approve before publishing.
 #   publish           Create the GitHub Release (uploads the .dmg AND the update
 #                     .zip) and deploy appcast.xml to GitHub Pages so it is
 #                     reachable at SUFeedURL. IRREVERSIBLE and public — refuses
@@ -68,7 +72,7 @@ changelog_file="$repo_dir/CHANGELOG.md"
 die() { print -u2 "release: $1"; exit 1; }
 
 usage() {
-    print -u2 "usage: $0 {preflight|build|sign|package|notarize|staple|appcast|publish|verify|verify-local|verify-available|all}"
+    print -u2 "usage: $0 {preflight|build|sign|package|notarize|staple|appcast|notes|publish|verify|verify-local|verify-available|all}"
     exit 2
 }
 
@@ -212,6 +216,14 @@ write_release_notes() {
         print -- "- Signed with a Developer ID identity and notarized by Apple, so it opens without Gatekeeper warnings and keeps its Accessibility grant across updates."
         print -- "- Updates are delivered as EdDSA-signed archives; the app verifies each update's signature before installing."
     } > "$out"
+}
+
+# Print the exact GitHub release notes for $release_version to stdout, without
+# building or publishing anything. This is the review artifact: it renders the
+# same text do_publish feeds to `gh release create`, so what you approve is what
+# ships. Refuses (via require_changelog_entry) if the changelog entry is missing.
+do_notes() {
+    write_release_notes /dev/stdout
 }
 
 # --- preflight ------------------------------------------------------------
@@ -694,6 +706,7 @@ case "$1" in
     staple) do_staple ;;
     appcast) do_appcast ;;
     publish) do_publish ;;
+    notes) do_notes ;;
     verify) do_verify ;;
     verify-local) do_verify_local ;;
     verify-available) do_verify_available ;;

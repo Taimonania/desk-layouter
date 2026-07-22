@@ -66,7 +66,22 @@ under `.build/release/` but publishes nothing. Notarization needs the network an
 a few minutes. Done when notarization reports `status: Accepted` and the `.dmg`, `.zip`,
 and `appcast.xml` all exist under `.build/release/`.
 
-### 5. Publish (irreversible — requires the user's authorization)
+### 5. Preview the release notes and get approval (last changeable point)
+Render the **exact** GitHub release notes that will be published and show them to
+the user verbatim:
+```sh
+make release-notes
+```
+This prints what `publish` feeds to `gh release create` — the `## Highlights`
+block derived from `CHANGELOG.md` plus the static `## Notes` footer — without
+building or publishing anything. Publishing (step 6) is the point of no return, so
+this is the last moment the notes can change: to revise them, edit `CHANGELOG.md`
+and re-run `make release-notes`. (Editing `CHANGELOG.md` after the dry run also
+changes the What's-New content bundled into the app, so re-run the dry run in step
+4 before publishing if you change it here.) **Wait for the user's explicit approval
+of these notes before continuing to publish.**
+
+### 6. Publish (irreversible — requires the user's authorization)
 ```sh
 RELEASE_PUBLISH=1 make release
 ```
@@ -78,10 +93,10 @@ Creates the GitHub Release (uploads `.dmg` + `.zip`), then pushes `appcast.xml` 
 - **Pages-rebuild race (expected):** after the push, GitHub Pages takes ~30–120s to
   serve the new `appcast.xml`. `make release` runs its `verify` step immediately, so it
   can fail *only* on the appcast-availability check while Pages is still rebuilding. That
-  specific failure is not a real problem — re-assert in step 6 once the feed is live.
+  specific failure is not a real problem — re-assert in step 7 once the feed is live.
   Any other failure is real.
 
-### 6. Verify availability
+### 7. Verify availability
 Poll the feed until Pages has rebuilt, then assert everything:
 ```sh
 until [ "$(curl -sI -o /dev/null -w '%{http_code}' https://taimonania.github.io/desk-layouter/appcast.xml)" = 200 ]; do sleep 10; done
@@ -93,7 +108,7 @@ stapled ticket; and availability — every published asset URL returns 200, the 
 `.dmg` checksum matches the local artifact, the appcast returns 200 and parses, its newest
 `<enclosure>` carries a non-empty `sparkle:edSignature`, and that enclosure URL returns 200.
 
-### 7. Confirm
+### 8. Confirm
 Report the release URL and that existing installs will now be offered the update.
 
 ## When the signing/update mechanism changes — not a normal release step
