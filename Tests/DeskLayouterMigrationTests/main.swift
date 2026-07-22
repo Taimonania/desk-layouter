@@ -1,6 +1,17 @@
 import DeskLayouterCore
 import Foundation
 
+private struct RawConfigurationDocument: Encodable {
+    let managedApplications: [ManagedApplication]
+    let pendingRemovals: [String]
+}
+
+private struct RawPresetDocument: Encodable {
+    let id: UUID
+    let name: String
+    let managedApplications: [ManagedApplication]
+}
+
 @main
 struct MigrationTestRunner {
     static func main() {
@@ -286,6 +297,72 @@ struct MigrationTestRunner {
                     on: DesktopSnapshot(display: secondDisplay, orderedDesktopUUIDs: ["S1"])
                 )
             )
+        }
+
+        // Persistence boundaries retain only the latest Assignment for a bundle
+        // identifier while preserving its first position in application order.
+        do {
+            let first = ManagedApplication(
+                bundleIdentifier: "com.example.Unique",
+                displayName: "Unique",
+                display: display,
+                desktopNumber: 1
+            )
+            let replacement = ManagedApplication(
+                bundleIdentifier: first.bundleIdentifier,
+                displayName: first.displayName,
+                display: secondDisplay,
+                desktopNumber: 2
+            )
+            let trailing = ManagedApplication(
+                bundleIdentifier: "com.example.Trailing",
+                displayName: "Trailing",
+                display: display,
+                desktopNumber: 3
+            )
+            let configuration = DeskLayouterConfiguration(
+                managedApplications: [first, trailing, replacement]
+            )
+            let preset = Preset(
+                name: "Unique",
+                managedApplications: [first, trailing, replacement]
+            )
+            check(
+                "constructed boards enforce one Assignment per application",
+                configuration.managedApplications == [replacement, trailing]
+            )
+            check(
+                "constructed Presets enforce one Assignment per application",
+                preset.managedApplications == [replacement, trailing]
+            )
+
+            do {
+                let configurationData = try JSONEncoder().encode(
+                    RawConfigurationDocument(
+                        managedApplications: [first, trailing, replacement],
+                        pendingRemovals: []
+                    )
+                )
+                let decoded = try ConfigurationSerialization.decode(from: configurationData)
+                let presetData = try JSONEncoder().encode(
+                    RawPresetDocument(
+                        id: preset.id,
+                        name: preset.name,
+                        managedApplications: [first, trailing, replacement]
+                    )
+                )
+                let decodedPreset = try JSONDecoder().decode(Preset.self, from: presetData)
+                check(
+                    "decoded boards enforce one Assignment per application",
+                    decoded.managedApplications == [replacement, trailing]
+                )
+                check(
+                    "decoded Presets enforce one Assignment per application",
+                    decodedPreset.managedApplications == [replacement, trailing]
+                )
+            } catch {
+                check("duplicate persisted Assignments decode", false, "\(error)")
+            }
         }
 
         if failures.isEmpty {

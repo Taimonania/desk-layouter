@@ -19,7 +19,7 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
 
     /// The managed applications captured in this snapshot, each carrying its
     /// Assignment (which Desktop) and optional Layout (where on it).
-    public var managedApplications: [ManagedApplication]
+    public internal(set) var managedApplications: [ManagedApplication]
 
     public init(
         id: UUID = UUID(),
@@ -28,7 +28,23 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
     ) {
         self.id = id
         self.name = name
-        self.managedApplications = managedApplications
+        self.managedApplications = managedApplications.uniquedByBundleIdentifier()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case managedApplications
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        managedApplications = try container.decodeIfPresent(
+            [ManagedApplication].self,
+            forKey: .managedApplications
+        )?.uniquedByBundleIdentifier() ?? []
     }
 
     /// The working configuration a load produces from this Preset: the snapshot's

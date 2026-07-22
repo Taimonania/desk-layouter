@@ -131,7 +131,7 @@ public struct ManagedApplication: Codable, Equatable, Sendable {
 /// Apply. It is only ever written from user actions — it is never seeded by
 /// reading the macOS Spaces store, so unmanaged system bindings never enter it.
 public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
-    public var managedApplications: [ManagedApplication]
+    public internal(set) var managedApplications: [ManagedApplication]
 
     /// Bundle identifiers of applications the user removed whose macOS bindings
     /// have not yet been deleted. Once an app is dropped from
@@ -145,7 +145,7 @@ public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
         managedApplications: [ManagedApplication] = [],
         pendingRemovals: [String] = []
     ) {
-        self.managedApplications = managedApplications
+        self.managedApplications = managedApplications.uniquedByBundleIdentifier()
         self.pendingRemovals = pendingRemovals
     }
 
@@ -161,7 +161,7 @@ public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
         managedApplications = try container.decode(
             [ManagedApplication].self,
             forKey: .managedApplications
-        )
+        ).uniquedByBundleIdentifier()
         pendingRemovals = try container.decodeIfPresent(
             [String].self,
             forKey: .pendingRemovals
@@ -233,6 +233,26 @@ public struct DeskLayouterConfiguration: Codable, Equatable, Sendable {
             managedApplications.map { ($0.bundleIdentifier, $0) },
             uniquingKeysWith: { _, latest in latest }
         )
+    }
+}
+
+extension Array where Element == ManagedApplication {
+    /// Enforces the one-Assignment-per-application invariant at persistence
+    /// boundaries. A later duplicate replaces the earlier value at its original
+    /// position, matching ``DeskLayouterConfiguration/upsert(_:)`` while keeping
+    /// application ordering stable.
+    func uniquedByBundleIdentifier() -> [ManagedApplication] {
+        var unique: [ManagedApplication] = []
+        var indexByBundleIdentifier: [String: Int] = [:]
+        for application in self {
+            if let index = indexByBundleIdentifier[application.bundleIdentifier] {
+                unique[index] = application
+            } else {
+                indexByBundleIdentifier[application.bundleIdentifier] = unique.count
+                unique.append(application)
+            }
+        }
+        return unique
     }
 }
 

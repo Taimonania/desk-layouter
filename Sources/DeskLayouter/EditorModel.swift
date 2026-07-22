@@ -389,16 +389,21 @@ final class EditorModel: ObservableObject {
             feedback = .info("No changes to apply.")
             return
         }
-        // Refuse to Apply while any Assignment is stranded on a Desktop that no
-        // longer exists: writing now would skip those bindings and delete their
-        // owned keys, silently dropping the Assignments (issue #52). Keep them and
-        // tell the user what to move instead.
-        if let explanation = applyBlockedExplanation {
-            feedback = .info(explanation)
-            return
-        }
         do {
             let snapshot = try spacesAdapter.currentDesktopSnapshot()
+            // Refresh the gate from the exact snapshot planning will consume.
+            // The active physical Display or Desktop count may have changed since
+            // the last UI refresh; using the cached gate could let the planner
+            // skip an Assignment while the adapter still treated its key as
+            // managed and deleted its existing binding. A later topology change
+            // is independently caught by the adapter's expected-snapshot check.
+            latestDesktopSnapshot = snapshot
+            desktopCount = snapshot.orderedDesktopUUIDs.count
+            refreshProjection()
+            if let explanation = applyBlockedExplanation {
+                feedback = .info(explanation)
+                return
+            }
             let managedBindings = assignmentPlanner.appBindings(
                 for: board.configuration.assignments,
                 on: snapshot
