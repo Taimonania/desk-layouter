@@ -54,10 +54,10 @@ struct SettingsView: View {
     }
 
     private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: Metrics.groupSpacing) {
-            Text("Updates")
-                .font(.headline)
-
+        section(
+            "Updates",
+            caption: "Desk Layouter always checks for updates automatically. This setting only controls whether an available update installs on its own. When it's off, you'll be asked before installing. Changes take effect the next time you launch Desk Layouter."
+        ) {
             Toggle(
                 "Automatically install updates",
                 isOn: Binding(
@@ -67,19 +67,14 @@ struct SettingsView: View {
             )
             .toggleStyle(.switch)
             .fixedSize()
-
-            Text("Desk Layouter always checks for updates automatically. This setting only controls whether an available update installs on its own. When it's off, you'll be asked before installing. Changes take effect the next time you launch Desk Layouter.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var supportSection: some View {
-        VStack(alignment: .leading, spacing: Metrics.groupSpacing) {
-            Text("Support")
-                .font(.headline)
-
+        section(
+            "Support",
+            caption: "Opens a prefilled GitHub issue requesting your Desk Layouter version, macOS version, expected behavior, and actual behavior."
+        ) {
             Button("Report a Problem") {
                 NSWorkspace.shared.open(
                     SupportReport.githubIssueURL(
@@ -89,8 +84,24 @@ struct SettingsView: View {
                 )
             }
             .accessibilityHint("Opens a prefilled GitHub issue in your browser")
+        }
+    }
 
-            Text("Opens a prefilled GitHub issue requesting your Desk Layouter version, macOS version, expected behavior, and actual behavior.")
+    /// One flat section: a bold header, its control, then an explanatory caption,
+    /// grouped tightly. Sections are spaced apart by the enclosing stack.
+    @ViewBuilder
+    private func section(
+        _ title: String,
+        caption: String,
+        @ViewBuilder control: () -> some View
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.groupSpacing) {
+            Text(title)
+                .font(.headline)
+
+            control()
+
+            Text(caption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
