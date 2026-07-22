@@ -27,6 +27,7 @@ struct EditorView: View {
 
     @State private var dropTargetDesktop: Int?
     @State private var searchFieldWidth: CGFloat = 0
+    @State private var footerActionButtonWidth: CGFloat = 0
     @State private var hoveredBundleIdentifier: String?
     @State private var editingLayoutCard: BoardCard?
     @State private var showingSavePresetSheet = false
@@ -940,16 +941,17 @@ struct EditorView: View {
     private func footerRegion(_ region: EditorChromeLayout.FooterRegion, version: String) -> some View {
         switch region {
         case let .actions(actions):
-            let widths = EditorChromeLayout.footerActionWidths(
-                groupWidth: EditorChromeLayout.footerActionGroupWidth
-            )
+            let widths = EditorChromeLayout.footerActionWidths(buttonWidth: footerActionButtonWidth)
             HStack(spacing: EditorChromeLayout.footerActionSpacing) {
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
                     footerAction(action)
-                        .frame(width: widths[index])
+                        // Before the widest label has been measured, fall back to
+                        // intrinsic sizing so the buttons never collapse to zero.
+                        .frame(width: widths[index] > 0 ? widths[index] : nil)
                 }
             }
-            .frame(width: EditorChromeLayout.footerActionGroupWidth)
+            .background(footerActionWidthProbe)
+            .onPreferenceChange(FooterActionWidthKey.self) { footerActionButtonWidth = $0 }
         case .flexibleSpace:
             Spacer(minLength: 0)
         case let .version(elements):
@@ -970,7 +972,6 @@ struct EditorView: View {
             }
             .keyboardShortcut(.defaultAction)
             .disabled(!model.canApply)
-            .frame(maxWidth: .infinity)
             .welcomeAnchor(.applyButton)
         case .arrange:
             // Arrange enacts Layouts on live windows and stays independent of
@@ -979,11 +980,25 @@ struct EditorView: View {
                 model.arrange()
             }
             .disabled(!model.canArrange)
-            .frame(maxWidth: .infinity)
             .help("Arranges this Desktop now, and your other Desktops the first time you visit each.")
             .accessibilityHint("Arranges this Desktop now, and your other Desktops the first time you visit each.")
             .welcomeAnchor(.arrangeButton)
         }
+    }
+
+    /// Measures the rendered width of the widest possible Apply label so both
+    /// footer buttons can reserve it. Kept hidden and non-interactive; a
+    /// background probe never affects the visible group's own layout.
+    private var footerActionWidthProbe: some View {
+        Button(EditorChromeLayout.footerWidestActionLabel) {}
+            .fixedSize()
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: FooterActionWidthKey.self, value: proxy.size.width)
+                }
+            )
+            .hidden()
+            .allowsHitTesting(false)
     }
 
     @ViewBuilder
@@ -1017,5 +1032,14 @@ private struct SearchFieldWidthKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+/// Reports the measured width of the widest footer action label so Apply and
+/// Arrange can both reserve it, keeping Arrange count-stable.
+private struct FooterActionWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

@@ -227,11 +227,22 @@ struct AppStateTestRunner {
                 EditorChromeLayout.footerActionSpacing == 6,
                 "got \(EditorChromeLayout.footerActionSpacing)"
             )
-            let widths = EditorChromeLayout.footerActionWidths(groupWidth: 260)
             check(
-                "Apply and Arrange receive equal widths independent of their titles",
-                widths.count == 2 && widths[0] == widths[1],
+                "the reserved footer label is the widest possible Apply count",
+                EditorChromeLayout.footerWidestActionLabel == "Apply (99)",
+                "got \(EditorChromeLayout.footerWidestActionLabel)"
+            )
+            let widths = EditorChromeLayout.footerActionWidths(buttonWidth: 84)
+            check(
+                "Apply and Arrange both reserve the measured widest-label width",
+                widths == [84, 84],
                 "got \(widths)"
+            )
+            let clamped = EditorChromeLayout.footerActionWidths(buttonWidth: -5)
+            check(
+                "a not-yet-measured (negative) width clamps to zero for both buttons",
+                clamped == [0, 0],
+                "got \(clamped)"
             )
         }
 

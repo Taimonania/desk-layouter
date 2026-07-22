@@ -29,14 +29,18 @@ public enum EditorChromeLayout {
     ]
 
     public static let footerActionSpacing: CGFloat = 6
-    public static let footerActionGroupWidth: CGFloat = 260
 
-    /// Returns the two equal button widths available inside the action group.
-    /// Titles do not participate, so `Apply` and `Apply (3)` lay out identically.
-    public static func footerActionWidths(groupWidth: CGFloat) -> [CGFloat] {
-        let actionCount = 2
-        let availableWidth = max(0, groupWidth - footerActionSpacing)
-        return Array(repeating: availableWidth / CGFloat(actionCount), count: actionCount)
+    /// The widest label Apply can ever present. The action group reserves this
+    /// label's rendered width (measured at runtime) for both buttons, so Arrange
+    /// never shifts sideways as the pending-change count grows.
+    public static let footerWidestActionLabel = "Apply (99)"
+
+    /// Returns the two equal button widths for the action group, both set to the
+    /// measured width of the widest label. Titles do not participate, so `Apply`
+    /// and `Apply (3)` lay out identically and Arrange stays put.
+    public static func footerActionWidths(buttonWidth: CGFloat) -> [CGFloat] {
+        let width = max(0, buttonWidth)
+        return [width, width]
     }
 
     public enum PresetControl: CaseIterable, Sendable {
