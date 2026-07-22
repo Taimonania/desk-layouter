@@ -126,8 +126,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "DeskLayouterPickerTests",
-            dependencies: ["DeskLayouterCore"],
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterPickerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterPickerBenchmark",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Benchmarks/DeskLayouterPickerBenchmark"
         ),
         .executableTarget(
             name: "DeskLayouterReconcilerTests",

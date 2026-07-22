@@ -65,7 +65,7 @@ final class EditorModel: ObservableObject {
     private let spacesAdapter: any SpacesAdapter
     private let boardStateStore: BoardStateStore
     private let presetLibraryStore: PresetLibraryStore
-    private let applicationsProvider: any InstalledApplicationsProviding
+    private let applicationPickerStore: ApplicationPickerStore
     private let windowArranger: WindowArranger
     private var board: BoardState
     private var presetLibrary: PresetLibrary
@@ -122,7 +122,7 @@ final class EditorModel: ObservableObject {
         self.spacesAdapter = spacesAdapter
         self.boardStateStore = boardStateStore
         self.presetLibraryStore = presetLibraryStore
-        self.applicationsProvider = applicationsProvider
+        applicationPickerStore = ApplicationPickerStore(provider: applicationsProvider)
         self.windowArranger = windowArranger
         self.transitionScheduler = transitionScheduler
         // Load the board and library as one reconciled session. A missing or
@@ -204,7 +204,7 @@ final class EditorModel: ObservableObject {
 
     /// The real application icon for a card, resolved in the macOS layer.
     func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage? {
-        applicationsProvider.icon(forBundleIdentifier: bundleIdentifier)
+        applicationPickerStore.icon(forBundleIdentifier: bundleIdentifier)
     }
 
     /// Re-enumerates installed/running applications and re-reads the Desktop
@@ -216,7 +216,8 @@ final class EditorModel: ObservableObject {
     }
 
     func refreshApplications() {
-        applications = applicationsProvider.applications()
+        applicationPickerStore.refresh()
+        applications = applicationPickerStore.applications
     }
 
     /// Reads the current Desktops on the sole active Display so the board renders
