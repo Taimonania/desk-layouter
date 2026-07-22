@@ -295,7 +295,14 @@ struct EditorView: View {
                 }
                 .disabled(!model.canDeleteSelectedPreset)
             } label: {
-                Image(systemName: "ellipsis")
+                // A Menu sizes its trigger to the label's height, and only a
+                // vertically-flexible text label grows to the frame — a plain SF
+                // Symbol image is rigid, so on its own the pill renders shorter than
+                // the text-labelled selector beside it. Embedding the symbol *in a
+                // Text* lays it out with text metrics, so the pill grows to the full
+                // control height and the icon centers, matching the selector.
+                Text(Image(systemName: "ellipsis"))
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .menuIndicator(managementMetrics.hidesMenuIndicator ? .hidden : .automatic)
             .frame(
