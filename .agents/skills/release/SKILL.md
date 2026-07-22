@@ -52,9 +52,23 @@ git log --oneline "$last"..HEAD
 GH_HOST=github.com gh pr list --repo Taimonania/desk-layouter --state merged \
   --search "merged:>$(git log -1 --format=%aI "$last")" --json number,title
 ```
-One line per real change; honest and concise. Done when `CHANGELOG.md` has a
-`## <version> — <date>` section for the new version and every change since `$last`
-is represented as a highlight in it.
+
+**Write for users, not developers.** Describe what changed from the user's point
+of view — what they can now do, what feels better, what problem went away — not how
+it was built. Skip implementation vocabulary (layout/column/widths/alignment/refactor,
+class or component names, PR numbers) and internal-only changes (tooling, CI, release
+plumbing, test-only work); if a change has no visible effect for the user, leave it
+out. Prefer plain, concrete language over jargon.
+
+- Bad (technical): "The Settings pane is now a capped left-aligned column with
+  consistent section spacing; footer actions use count-stable equal widths."
+- Good (user-focused): "Settings are easier to scan, with a cleaner, more organized
+  layout. The editor's buttons now line up neatly and stay put instead of shifting
+  around as you work."
+
+One line per real, user-visible change; honest and concise. Done when `CHANGELOG.md`
+has a `## <version> — <date>` section for the new version and every user-facing change
+since `$last` is represented as a plain-language highlight in it.
 
 ### 4. Dry run (no publish)
 ```sh
