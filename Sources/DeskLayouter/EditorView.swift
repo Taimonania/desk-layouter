@@ -44,9 +44,9 @@ struct EditorView: View {
                 // Fixed header — always visible, never clipped by a scroll.
                 header
 
-                // Preset bar: choose/load a Preset, save the board as a new one,
-                // or explicitly update the selected one. Loading only swaps the
-                // working board — Apply and Arrange stay separate, explicit actions.
+                // Preset bar: switching stays in the selector, management stays in
+                // the adjacent menu, and working-copy actions appear only while the
+                // selected Preset is edited. None of these Applies or Arranges.
                 presetBar
 
                 // Search-to-add control row: type to filter installed apps; the
@@ -257,58 +257,58 @@ struct EditorView: View {
             } label: {
                 Text(model.presetSelectionLabel)
                     .frame(minWidth: 120, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .frame(width: 220)
             .help("Load a saved Preset as a working copy. Loading never Applies or Arranges.")
             .accessibilityLabel("Preset selector, currently \(model.presetSelectionLabel)")
 
-            Button {
-                newPresetName = ""
-                savePresetError = nil
-                showingSavePresetSheet = true
-            } label: {
-                Label("Save as Preset…", systemImage: "square.and.arrow.down")
-            }
-            .help("Save the current board as a new Preset")
-            .accessibilityLabel("Save the current board as a new Preset")
+            Menu {
+                Button {
+                    newPresetName = ""
+                    savePresetError = nil
+                    showingSavePresetSheet = true
+                } label: {
+                    Label("Save as New Preset…", systemImage: "square.and.arrow.down")
+                }
 
-            Button {
-                model.updateSelectedPreset()
-            } label: {
-                Label("Update Preset", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .disabled(!model.canUpdateSelectedPreset)
-            .help("Update the selected Preset to match the current board")
-            .accessibilityLabel("Update the selected Preset")
+                Divider()
 
-            Button(role: .destructive) {
-                model.requestRevertSelectedPreset()
-            } label: {
-                Label("Revert", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!model.canRevertSelectedPreset)
-            .help("Restore the selected Preset over the current board after confirmation")
-            .accessibilityLabel("Revert changes to the selected Preset")
+                Button {
+                    renamePresetName = model.selectedPresetName
+                    renamePresetError = nil
+                    showingRenamePresetSheet = true
+                } label: {
+                    Label("Rename \"\(model.selectedPresetName)\"…", systemImage: "pencil")
+                }
+                .disabled(!model.canRenameSelectedPreset)
 
-            Button {
-                renamePresetName = model.selectedPresetName
-                renamePresetError = nil
-                showingRenamePresetSheet = true
+                Button(role: .destructive) {
+                    model.requestDeleteSelectedPreset()
+                } label: {
+                    Label("Delete \"\(model.selectedPresetName)\"…", systemImage: "trash")
+                }
+                .disabled(!model.canDeleteSelectedPreset)
             } label: {
-                Label("Rename Preset…", systemImage: "pencil")
+                Image(systemName: "ellipsis")
             }
-            .disabled(!model.canRenameSelectedPreset)
-            .help("Rename the selected Preset. This never Applies or Arranges.")
-            .accessibilityLabel("Rename the selected Preset")
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Manage the selected Preset")
+            .accessibilityLabel("Manage Preset \(model.selectedPresetName)")
 
-            Button(role: .destructive) {
-                model.requestDeleteSelectedPreset()
-            } label: {
-                Label("Delete Preset…", systemImage: "trash")
+            if model.isSelectedPresetModified {
+                Button("Update") {
+                    model.updateSelectedPreset()
+                }
+                .help("Update Preset \"\(model.selectedPresetName)\" to match the current board")
+                .accessibilityLabel("Update Preset \(model.selectedPresetName)")
+
+                Button("Revert", role: .destructive) {
+                    model.requestRevertSelectedPreset()
+                }
+                .help("Restore Preset \"\(model.selectedPresetName)\" over the current board after confirmation")
+                .accessibilityLabel("Revert changes to Preset \(model.selectedPresetName)")
             }
-            .disabled(!model.canDeleteSelectedPreset)
-            .help("Delete the selected Preset. At least one Preset is always kept.")
-            .accessibilityLabel("Delete the selected Preset")
 
             Spacer(minLength: 0)
         }
