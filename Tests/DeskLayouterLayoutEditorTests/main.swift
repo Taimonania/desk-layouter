@@ -357,6 +357,69 @@ struct LayoutDraftTestRunner {
                   "cols \(draft.columnSpan) rows \(draft.rowSpan)")
         }
 
+        // Custom splits (5–9) drive the draft exactly like presets: a nine-way
+        // vertical split clamps a span into range and stays valid.
+        do {
+            var draft = LayoutDraft()
+            draft.setVerticalDivision(.ninths)
+            check("a nine-way split exposes nine rows",
+                  draft.verticalDivision.cellCount == 9, "got \(draft.verticalDivision.cellCount)")
+            draft.setRowStart(7)
+            draft.setRowEnd(8)
+            check("a span inside a nine-way split is valid",
+                  draft.layout.isValid && draft.rowSpan == LayoutSpan(start: 7, end: 8),
+                  "got \(draft.rowSpan)")
+            // Shrinking a Custom axis back to a preset re-clamps the span.
+            draft.setVerticalDivision(.thirds)
+            check("shrinking ninths → thirds clamps the row span into range",
+                  draft.rowSpan.end <= 2 && draft.layout.isValid, "got \(draft.rowSpan)")
+        }
+
+        // Columns and rows split independently: 7 columns × halves rows is valid.
+        do {
+            var draft = LayoutDraft()
+            draft.setHorizontalDivision(.sevenths)
+            draft.setVerticalDivision(.halves)
+            check("columns and rows carry independent custom/preset counts",
+                  draft.horizontalDivision == .sevenths && draft.verticalDivision == .halves,
+                  "cols \(draft.horizontalDivision) rows \(draft.verticalDivision)")
+            check("7×halves builds a valid Layout", draft.layout.isValid)
+        }
+
+        // Segment mapping — each preset division lights its own segment, every 5–9
+        // split lights the single Custom segment.
+        do {
+            check("full → the Full segment", Division.full.segment == .full)
+            check("halves → the Halves segment", Division.halves.segment == .halves)
+            check("thirds → the Thirds segment", Division.thirds.segment == .thirds)
+            check("fourths → the Fourths segment", Division.fourths.segment == .fourths)
+            for count in 5...9 {
+                check("custom(\(count)) → the Custom segment",
+                      Division.custom(count).segment == .custom)
+            }
+            check("the control offers five segments in order",
+                  DivisionSegment.allCases == [.full, .halves, .thirds, .fourths, .custom],
+                  "got \(DivisionSegment.allCases)")
+        }
+
+        // Selection — choosing Custom from a preset defaults to 5; re-choosing
+        // Custom on an already-custom axis keeps its count; a preset segment always
+        // yields its own division regardless of the current one.
+        do {
+            check("Custom from a preset (fourths) defaults to 5 parts",
+                  Division.fourths.selecting(.custom) == .fifths,
+                  "got \(Division.fourths.selecting(.custom))")
+            check("Custom from Full defaults to 5 parts",
+                  Division.full.selecting(.custom) == .fifths)
+            check("re-selecting Custom on a 7-way axis keeps 7 parts",
+                  Division.sevenths.selecting(.custom) == .sevenths,
+                  "got \(Division.sevenths.selecting(.custom))")
+            check("selecting Halves from a custom axis yields halves",
+                  Division.eighths.selecting(.halves) == .halves)
+            check("selecting Full from a custom axis yields full",
+                  Division.ninths.selecting(.full) == .full)
+        }
+
         if failures.isEmpty {
             print("Layout draft tests passed")
         } else {

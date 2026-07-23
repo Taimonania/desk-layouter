@@ -2,26 +2,55 @@ import CoreGraphics
 import Foundation
 
 /// How an axis of a Desktop's usable area is divided when placing a window: not at
-/// all (full), or into halves, thirds, or fourths. The raw value is the number
-/// of equal cells the axis is split into, so `cellCount` reads straight off it
-/// and the persisted JSON stores a plain `1`, `2`, `3`, or `4`.
+/// all (full), into halves, thirds, or fourths, or into a custom 5–9 equal parts.
+/// The raw value is the number of equal cells the axis is split into, so
+/// `cellCount` reads straight off it and the persisted JSON stores a plain integer
+/// (`1`…`9`).
 ///
 /// `full` is a single undivided cell covering the complete usable extent of the
-/// axis (no menu bar / Dock, no macOS native fullscreen). The cases are ordered
-/// full, halves, thirds, fourths — the order the editor offers them in — and
+/// axis (no menu bar / Dock, no macOS native fullscreen). The cases are ordered by
+/// cell count — full, halves, thirds, fourths, then the custom 5–9 splits — and
 /// `full`'s raw value `1` does not collide with the `2`/`3`/`4` written by
-/// Layouts persisted before Full existed, so those remain compatible.
+/// Layouts persisted before Full existed, so those remain compatible. The 5–9 raw
+/// values are new, so no older persisted Layout can carry them.
 public enum Division: Int, Codable, Equatable, Sendable, CaseIterable {
     case full = 1
     case halves = 2
     case thirds = 3
     case fourths = 4
+    case fifths = 5
+    case sixths = 6
+    case sevenths = 7
+    case eighths = 8
+    case ninths = 9
 
     /// The number of equal cells this division splits its axis into.
     public var cellCount: Int { rawValue }
 
     /// Whether this axis is a single undivided cell covering the whole axis.
     public var isFull: Bool { self == .full }
+
+    /// The divisions offered as fixed presets in the editor's segmented control,
+    /// in display order, before the Custom option: Full, Halves, Thirds, Fourths.
+    public static let presets: [Division] = [.full, .halves, .thirds, .fourths]
+
+    /// The part counts the Custom option offers in its dropdown: 5 through 9.
+    public static let customCounts: ClosedRange<Int> = 5...9
+
+    /// The default Custom split (5 parts) used when switching to Custom from a
+    /// preset.
+    public static let defaultCustom: Division = .fifths
+
+    /// Whether this is a Custom split (5–9 parts) rather than one of the presets.
+    public var isCustom: Bool { cellCount >= Division.customCounts.lowerBound }
+
+    /// The Custom division for `count` equal parts, clamped into the 5–9 range so a
+    /// stray value can never produce an invalid division.
+    public static func custom(_ count: Int) -> Division {
+        let clamped = min(max(count, customCounts.lowerBound), customCounts.upperBound)
+        // Raw values 5…9 all exist, so this force-unwrap is total.
+        return Division(rawValue: clamped)!
+    }
 }
 
 /// An inclusive run of cells a window occupies on one axis, expressed as

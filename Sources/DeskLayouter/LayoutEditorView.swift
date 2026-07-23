@@ -125,7 +125,7 @@ struct LayoutEditorView: View {
             footer
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 500)
     }
 
     // MARK: - Controls
@@ -178,13 +178,25 @@ struct LayoutEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-            Picker("Division", selection: division) {
-                ForEach(Division.allCases, id: \.self) { option in
-                    Text(Self.divisionName(option)).tag(option)
+            Picker("Division", selection: segmentBinding(division)) {
+                ForEach(DivisionSegment.allCases, id: \.self) { segment in
+                    Text(Self.segmentName(segment)).tag(segment)
                 }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+
+            if division.wrappedValue.isCustom {
+                Picker("Parts", selection: customCountBinding(division)) {
+                    ForEach(Array(Division.customCounts), id: \.self) { count in
+                        Text("\(count) parts").tag(count)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("Custom part count")
+            }
 
             if !isFull {
                 HStack(spacing: 10) {
@@ -209,10 +221,25 @@ struct LayoutEditorView: View {
 
     private var preview: some View {
         VStack(spacing: 6) {
-            InteractiveLayoutGrid(draft: $draft, cellSize: 26)
+            InteractiveLayoutGrid(draft: $draft, cellSize: previewCellSize)
             Text("Click or drag to select")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The mini-grid cell size, shrunk for larger splits so the preview stays
+    /// legible and fits the sheet all the way up to a 9×9 grid. Presets (up to
+    /// fourths) keep the roomy 26pt cell; Custom counts step it down.
+    private var previewCellSize: CGFloat {
+        let maxCount = max(draft.horizontalDivision.cellCount, draft.verticalDivision.cellCount)
+        switch maxCount {
+        case ...4: return 26
+        case 5: return 22
+        case 6: return 19
+        case 7: return 16
+        case 8: return 14
+        default: return 12
         }
     }
 
@@ -263,14 +290,35 @@ struct LayoutEditorView: View {
         })
     }
 
+    /// Maps a division binding to the segmented control's selection: reads the
+    /// segment the current division sits on, and on a change routes the pick
+    /// through ``Division/selecting(_:)`` so switching to Custom from a preset
+    /// defaults to 5 while re-picking Custom on a 5–9 axis keeps its count.
+    private func segmentBinding(_ division: Binding<Division>) -> Binding<DivisionSegment> {
+        Binding(
+            get: { division.wrappedValue.segment },
+            set: { division.wrappedValue = division.wrappedValue.selecting($0) }
+        )
+    }
+
+    /// Maps a division binding to the Custom dropdown's part count (5–9),
+    /// clamped through ``Division/custom(_:)``.
+    private func customCountBinding(_ division: Binding<Division>) -> Binding<Int> {
+        Binding(
+            get: { division.wrappedValue.cellCount },
+            set: { division.wrappedValue = Division.custom($0) }
+        )
+    }
+
     // MARK: - Labels
 
-    private static func divisionName(_ division: Division) -> String {
-        switch division {
+    private static func segmentName(_ segment: DivisionSegment) -> String {
+        switch segment {
         case .full: "Full"
         case .halves: "Halves"
         case .thirds: "Thirds"
         case .fourths: "Fourths"
+        case .custom: "Custom"
         }
     }
 
