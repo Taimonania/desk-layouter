@@ -60,7 +60,6 @@ struct WelcomeTourOverlay: View {
     private static let spotlightPadding: CGFloat = 10
     private static let spotlightCornerRadius: CGFloat = 10
     private static let calloutWidth: CGFloat = 430
-    private static let calloutHeight: CGFloat = 360
 
     var body: some View {
         ZStack {
@@ -108,11 +107,13 @@ struct WelcomeTourOverlay: View {
 
     // MARK: - Callout
 
-    /// Every page uses the same centered card geometry, keeping the explanatory
-    /// copy and bottom navigation stable while spotlight targets change behind it.
+    /// Every page uses the same centered card width, but the card hugs its content
+    /// vertically so short steps get a short card instead of a mostly-empty box that
+    /// can cover the very controls it points at (issue #110). The bottom navigation
+    /// stays stable while spotlight targets change behind it.
     private var calloutLayer: some View {
         callout
-            .frame(width: Self.calloutWidth, height: Self.calloutHeight)
+            .frame(width: Self.calloutWidth)
             .frame(
                 maxWidth: .infinity,
                 maxHeight: .infinity,
@@ -132,7 +133,7 @@ struct WelcomeTourOverlay: View {
             }
 
             Text(tour.currentStep.message)
-                .font(.callout)
+                .font(.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
