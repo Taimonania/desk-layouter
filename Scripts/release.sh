@@ -199,9 +199,7 @@ require_changelog_entry() {
 }
 
 # Compose the GitHub release notes for $release_version into $1, deriving the
-# highlights from CHANGELOG.md and appending the static platform/signing notes
-# (facts that are not per-version highlights, so they live here rather than in the
-# per-version changelog the What's-New screen renders).
+# highlights from CHANGELOG.md (the single source of release notes).
 write_release_notes() {
     local out="$1"
     require_changelog_entry
@@ -209,12 +207,6 @@ write_release_notes() {
         print "## Highlights"
         print ""
         changelog_section
-        print ""
-        print "## Notes"
-        print ""
-        print -- "- macOS 13+; universal (Apple Silicon + Intel)."
-        print -- "- Signed with a Developer ID identity and notarized by Apple, so it opens without Gatekeeper warnings and keeps its Accessibility grant across updates."
-        print -- "- Updates are delivered as EdDSA-signed archives; the app verifies each update's signature before installing."
     } > "$out"
 }
 

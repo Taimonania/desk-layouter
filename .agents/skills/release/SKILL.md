@@ -43,9 +43,7 @@ Add the new version's entry to `CHANGELOG.md`: a `## <version> — <date>` secti
 user-facing highlight bullet per real change. `CHANGELOG.md` is the single source
 of release notes — the app bundles it for the What's-New screen, and the pipeline
 derives this release's GitHub notes from the matching section (`preflight` and
-`publish` both refuse without a non-empty entry; the static platform/signing
-"Notes" footer is appended automatically, so keep only highlights here). Gather
-the changes:
+`publish` both refuse without a non-empty entry). Gather the changes:
 ```sh
 last=$(GH_HOST=github.com gh release view --repo Taimonania/desk-layouter --json tagName -q .tagName)
 git log --oneline "$last"..HEAD
@@ -60,15 +58,22 @@ class or component names, PR numbers) and internal-only changes (tooling, CI, re
 plumbing, test-only work); if a change has no visible effect for the user, leave it
 out. Prefer plain, concrete language over jargon.
 
-- Bad (technical): "The Settings pane is now a capped left-aligned column with
-  consistent section spacing; footer actions use count-stable equal widths."
-- Good (user-focused): "Settings are easier to scan, with a cleaner, more organized
-  layout. The editor's buttons now line up neatly and stay put instead of shifting
-  around as you work."
+**Format each highlight as a bold lead-in plus an explanation.** Start the bullet
+with a short, punchy **bold** summary — a headline fragment, not a full grammatical
+sentence (no trailing period on the bold part) — then follow with one or two plain
+sentences explaining what it does. Pattern: `- **<fat summary>**. <sentence or two>`
 
-One line per real, user-visible change; honest and concise. Done when `CHANGELOG.md`
+- Example: `- **Enable more rows/columns for your Layout**. You can now pick a
+  custom split count per axis in the Layout editor. Split into up to 9 columns or rows.`
+- Bad (technical, no lead-in): "The Settings pane is now a capped left-aligned
+  column with consistent section spacing; footer actions use count-stable equal widths."
+- Good (fat lead-in + explanation): "**Cleaner, easier-to-scan Settings**. The
+  Settings layout is more organized, and the editor's buttons now line up neatly and
+  stay put instead of shifting around as you work."
+
+One bullet per real, user-visible change; honest and concise. Done when `CHANGELOG.md`
 has a `## <version> — <date>` section for the new version and every user-facing change
-since `$last` is represented as a plain-language highlight in it.
+since `$last` is represented as a fat-lead-in highlight in it.
 
 ### 4. Dry run (no publish)
 ```sh
@@ -87,8 +92,7 @@ the user verbatim:
 make release-notes
 ```
 This prints what `publish` feeds to `gh release create` — the `## Highlights`
-block derived from `CHANGELOG.md` plus the static `## Notes` footer — without
-building or publishing anything. Publishing (step 6) is the point of no return, so
+block derived from `CHANGELOG.md` — without building or publishing anything. Publishing (step 6) is the point of no return, so
 this is the last moment the notes can change: to revise them, edit `CHANGELOG.md`
 and re-run `make release-notes`. (Editing `CHANGELOG.md` after the dry run also
 changes the What's-New content bundled into the app, so re-run the dry run in step
