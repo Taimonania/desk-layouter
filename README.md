@@ -49,6 +49,14 @@ effect; a quick flicker of the Dock and menu bar is expected.
 4. Click **Apply**. Your apps will now open there from now on.
 5. (Optional) Set a Layout for an app and click **Arrange** to position its window.
 
+## Security & updates
+
+Desk Layouter is a universal build for Apple Silicon and Intel Macs, running on macOS 13
+(Ventura) or newer. It's signed with a Developer ID identity and notarized by Apple, so it
+opens without Gatekeeper warnings and keeps its Accessibility grant across updates. Updates
+are delivered as EdDSA-signed archives, and the app verifies each update's signature before
+installing it.
+
 ## Support
 
 [Report a problem on GitHub](https://github.com/Taimonania/desk-layouter/issues/new).
