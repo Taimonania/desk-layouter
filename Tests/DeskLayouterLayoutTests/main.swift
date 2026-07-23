@@ -212,12 +212,99 @@ struct LayoutTestRunner {
             )
         }
 
-        // Division offers Full, Halves, Thirds, Fourths in that order.
+        // Divisions run full, halves, thirds, fourths, then the custom 5–9 splits,
+        // in ascending cell-count order; the four presets remain that fixed set.
         do {
             check(
-                "divisions are offered in the order full, halves, thirds, fourths",
-                Division.allCases == [.full, .halves, .thirds, .fourths],
+                "divisions run full…ninths in ascending cell-count order",
+                Division.allCases == [.full, .halves, .thirds, .fourths,
+                                      .fifths, .sixths, .sevenths, .eighths, .ninths],
                 "got \(Division.allCases)"
+            )
+            check(
+                "the presets are exactly full, halves, thirds, fourths",
+                Division.presets == [.full, .halves, .thirds, .fourths],
+                "got \(Division.presets)"
+            )
+        }
+
+        // Custom splits 5–9 each report a matching cell count and read as custom,
+        // while the presets do not.
+        do {
+            for count in 5...9 {
+                let division = Division.custom(count)
+                check("custom(\(count)) has \(count) cells", division.cellCount == count,
+                      "got \(division.cellCount)")
+                check("custom(\(count)) reads as custom", division.isCustom)
+            }
+            check("full is not custom", Division.full.isCustom == false)
+            check("fourths is not custom", Division.fourths.isCustom == false)
+            check("custom(3) clamps up to 5 cells", Division.custom(3).cellCount == 5,
+                  "got \(Division.custom(3).cellCount)")
+            check("custom(42) clamps down to 9 cells", Division.custom(42).cellCount == 9,
+                  "got \(Division.custom(42).cellCount)")
+        }
+
+        // Geometry inherits the new counts through cellCount with no math changes:
+        // seven equal columns divide the width into exact sevenths, edge-to-edge.
+        do {
+            let cells = (0..<7).map { index in
+                Layout(
+                    horizontalDivision: .sevenths,
+                    verticalDivision: .full,
+                    columnSpan: .single(index),
+                    rowSpan: .single(0)
+                ).targetFrame(in: frame)
+            }
+            check("seventh columns start at the left edge", approxEqual(cells[0].minX, 0),
+                  "got \(cells[0].minX)")
+            check("seventh columns end at the right edge", approxEqual(cells[6].maxX, 1000),
+                  "got \(cells[6].maxX)")
+            check("each seventh is one-seventh of the width",
+                  approxEqual(cells[3].width, 1000.0 / 7.0), "got \(cells[3].width)")
+            let contiguous = zip(cells, cells.dropFirst()).allSatisfy { approxEqual($0.maxX, $1.minX) }
+            check("adjacent sevenths meet with no gap", contiguous)
+        }
+
+        // The bottom cell of a nine-way vertical split occupies the lowest ninth
+        // (row 0 is the top, frame is bottom-left origin).
+        do {
+            let layout = Layout(
+                horizontalDivision: .full,
+                verticalDivision: .ninths,
+                columnSpan: .single(0),
+                rowSpan: .single(8)
+            )
+            let rect = layout.targetFrame(in: frame)
+            check(
+                "the last of nine rows occupies the bottom ninth",
+                rectsEqual(rect, CGRect(x: 0, y: 0, width: 1000, height: 800.0 / 9.0)),
+                "got \(rect)"
+            )
+        }
+
+        // A Custom-split Layout (7 columns × halves rows) persists and reloads.
+        do {
+            let layout = Layout(
+                horizontalDivision: .sevenths,
+                verticalDivision: .halves,
+                columnSpan: .single(4),
+                rowSpan: .single(1)
+            )
+            let app = ManagedApplication.legacy(
+                bundleIdentifier: "com.example.Custom",
+                displayName: "Custom",
+                desktopNumber: 1,
+                layout: layout
+            )
+            let config = DeskLayouterConfiguration(managedApplications: [app])
+            let decoded = try? ConfigurationSerialization.decode(
+                from: ConfigurationSerialization.encode(config)
+            )
+            check(
+                "a Custom-split Layout round-trips through persistence",
+                decoded?.managedApplications.first?.layout == layout,
+                "got \(String(describing: decoded?.managedApplications.first?.layout))"
             )
         }
 
