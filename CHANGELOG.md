@@ -6,6 +6,11 @@ highlights (newest first). The app bundles this file and shows the newest
 highlights on the first launch after an upgrade (the What's-New screen); the
 release pipeline derives each GitHub release's notes from the matching section.
 
+## 0.4.1 — 2026-07-24
+
+- **Correctly formatted What's New highlights**. The What's New screen now shows bold formatting properly instead of printing literal asterisks around the emphasized text.
+- **A right-sized Welcome callout**. The first-run Welcome tour's callout no longer balloons into a large empty card over the board — it hugs its content and stays neatly centered.
+
 ## 0.4.0 — 2026-07-24
 
 - **Enable more rows and columns for your Layout**. You can now split any axis into a custom number of sections — anywhere from 5 up to 9 columns or rows — right in the Layout editor, alongside the existing Full, Halves, Thirds, and Fourths presets.
