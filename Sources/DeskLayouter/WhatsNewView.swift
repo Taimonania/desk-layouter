@@ -79,13 +79,13 @@ struct WhatsNewView: View {
             }
             ForEach(Array(entry.highlights.enumerated()), id: \.offset) { _, highlight in
                 Label {
-                    Text(highlight)
+                    Text(inlineMarkdownAttributedString(highlight))
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "sparkle")
                         .foregroundStyle(.tint)
                 }
-                .accessibilityLabel(highlight)
+                .accessibilityLabel(String(inlineMarkdownAttributedString(highlight).characters))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
