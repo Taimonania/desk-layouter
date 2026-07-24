@@ -84,8 +84,8 @@ UI-observable criterion:
 
 - **Reuse a catalog Scene** when one shows the needed state. Current catalog keys:
   `whats-new`, `editor-two-displays`, `editor-single-display` (see
-  `Sources/DeskLayouter/SceneRender.swift`, `SceneCatalog`). List keys with an unknown-key
-  render, e.g. `swift run DeskLayouter --render-scene __list`.
+  `Sources/DeskLayouter/SceneRender.swift`, `SceneCatalog`). Any unknown key exits non-zero
+  and lists the available keys on stderr, so read `SceneCatalog` for the current set.
 - **Author a temporary one-off Scene** when the catalog doesn't cover it — add it to
   `SceneCatalog` built from the app's existing injectable seams (`EditorModel.init(spacesAdapter:
   applicationsProvider:…)`, an injected `DisplayTopologySnapshot` topology, a fabricated
