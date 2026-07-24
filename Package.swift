@@ -23,7 +23,7 @@ let package = Package(
             exclude: [
                 "AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift",
                 "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift", "WelcomeTourOverlay.swift",
-                "WhatsNewView.swift", "BundledChangelog.swift", "HoverTooltip.swift",
+                "WhatsNewView.swift", "BundledChangelog.swift", "HoverTooltip.swift", "SceneRender.swift",
             ],
             sources: [
                 "SpacesAdapter.swift",
@@ -48,6 +48,7 @@ let package = Package(
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
                 "InlineMarkdown.swift",
+                "SceneRenderArguments.swift",
             ]
         ),
         .executableTarget(
@@ -81,6 +82,7 @@ let package = Package(
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
                 "InlineMarkdown.swift",
+                "SceneRenderArguments.swift",
             ]
         ),
         .executableTarget(
@@ -247,6 +249,11 @@ let package = Package(
             name: "DeskLayouterWhatsNewTests",
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterWhatsNewTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterSceneRenderTests",
+            dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterSceneRenderTests"
         ),
     ]
 )
