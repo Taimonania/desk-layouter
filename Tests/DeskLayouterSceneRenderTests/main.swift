@@ -123,12 +123,48 @@ struct SceneRenderTestRunner {
             "pngs \(whatsNewResult.pngs), size \(pngByteSize(whatsNewResult.renderDir, "whats-new.png"))"
         )
 
-        // `all` renders every catalog Scene (which includes whats-new).
+        // The editor Scenes (issue #120) each build their EditorModel purely from a
+        // fabricated topology + apps provider + throwaway per-process stores and
+        // render the real editor canvas (LazyVGrid columns + AppKit controls) — the
+        // observable proof being a non-empty PNG at the documented path, exit 0.
+        let twoDisplaysResult = render(["--render-scene", "editor-two-displays"])
+        check(
+            "editor-two-displays render exits 0",
+            twoDisplaysResult.code == 0,
+            "exit \(twoDisplaysResult.code) — \(twoDisplaysResult.stderr)"
+        )
+        check(
+            "editor-two-displays writes a non-empty PNG at the documented path",
+            twoDisplaysResult.pngs == ["editor-two-displays.png"]
+                && pngByteSize(twoDisplaysResult.renderDir, "editor-two-displays.png") > 0,
+            "pngs \(twoDisplaysResult.pngs), size \(pngByteSize(twoDisplaysResult.renderDir, "editor-two-displays.png"))"
+        )
+
+        let singleDisplayResult = render(["--render-scene", "editor-single-display"])
+        check(
+            "editor-single-display render exits 0",
+            singleDisplayResult.code == 0,
+            "exit \(singleDisplayResult.code) — \(singleDisplayResult.stderr)"
+        )
+        check(
+            "editor-single-display writes a non-empty PNG at the documented path",
+            singleDisplayResult.pngs == ["editor-single-display.png"]
+                && pngByteSize(singleDisplayResult.renderDir, "editor-single-display.png") > 0,
+            "pngs \(singleDisplayResult.pngs), size \(pngByteSize(singleDisplayResult.renderDir, "editor-single-display.png"))"
+        )
+
+        // `all` renders every catalog Scene (which includes whats-new and both editors).
         let allResult = render(["--render-scene", "all"])
         check("--render-scene all exits 0", allResult.code == 0, "exit \(allResult.code)")
         check(
             "--render-scene all renders every catalog Scene including whats-new",
             allResult.pngs.contains("whats-new.png"),
+            "pngs \(allResult.pngs)"
+        )
+        check(
+            "--render-scene all includes both editor Scenes",
+            allResult.pngs.contains("editor-two-displays.png")
+                && allResult.pngs.contains("editor-single-display.png"),
             "pngs \(allResult.pngs)"
         )
 
