@@ -137,7 +137,12 @@ struct WelcomeTourOverlay: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Spacer(minLength: 8)
+            // A fixed gap before the navigation row — NOT a Spacer. With the card's
+            // height now unspecified (issue #110), a greedy `Spacer` would expand to
+            // the full height proposed by the outer `.frame(maxHeight: .infinity)` and
+            // blow the card up to nearly full-screen. A fixed gap lets the VStack hug
+            // its content so short steps get a short card (issue #116).
+            Color.clear.frame(height: 8)
 
             HStack(spacing: 10) {
                 if !tour.isFirstStep {

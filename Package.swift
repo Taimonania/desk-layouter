@@ -47,6 +47,7 @@ let package = Package(
                 "SupportReport.swift",
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
+                "InlineMarkdown.swift",
             ]
         ),
         .executableTarget(
@@ -79,6 +80,7 @@ let package = Package(
                 "SupportReport.swift",
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
+                "InlineMarkdown.swift",
             ]
         ),
         .executableTarget(
@@ -130,6 +132,11 @@ let package = Package(
             name: "DeskLayouterPickerTests",
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterPickerTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterInlineMarkdownTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterInlineMarkdownTests"
         ),
         .executableTarget(
             name: "DeskLayouterPickerBenchmark",
