@@ -10,7 +10,7 @@ Use /tdd where possible, at pre-agreed seams.
 
 Run typechecking regularly, single test files regularly, and the full test suite once at the end.
 
-Once done, use /code-review to review the work.
+Once done, verify the work: run /code-review (does the code follow the standards and match the spec?) **and** /acceptance-review (do the change's UI-observable acceptance criteria actually render correctly?) in the same verification pass. Address the findings from both.
 
 Commit your work to the current branch.
 
