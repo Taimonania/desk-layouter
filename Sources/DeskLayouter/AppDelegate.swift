@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     static func main() {
+        // Acceptance-Review render mode (issue #119): launched with `--render-scene`,
+        // the app renders the selected Scene(s) offscreen to PNG and exits here,
+        // before any menu-bar item, window, or Sparkle updater is installed. Without
+        // the flag this returns false and the app boots exactly as today.
+        if SceneRender.runIfRequested() { return }
+
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate

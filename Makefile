@@ -1,4 +1,4 @@
-.PHONY: build run relaunch test test-desktop-placement benchmark-picker \
+.PHONY: build run relaunch render-scenes test test-desktop-placement benchmark-picker \
 	multi-display-arm multi-display-verify multi-display-restore \
 	unavailable-display-arm unavailable-display-external-disconnected \
 	unavailable-display-external-reconnected unavailable-display-lid-closed \
@@ -18,6 +18,15 @@ run: build
 relaunch: build
 	-pkill -x DeskLayouter
 	open ".build/Desk Layouter.app"
+
+# Acceptance-Review render mode (issue #119). Renders catalog Scenes offscreen to
+# PNGs under .build/scene-renders/ so a human or agent can open them. `SCENE=<key>`
+# renders one Scene (e.g. SCENE=whats-new); the default renders the whole catalog.
+# Needs a GUI (Aqua) login session but no Screen Recording permission and no
+# physical Display.
+SCENE ?= all
+render-scenes:
+	swift run DeskLayouter --render-scene $(SCENE)
 
 test:
 	swift run DeskLayouterPlannerTests
@@ -49,6 +58,7 @@ test:
 	swift run DeskLayouterAppStateTests
 	swift run DeskLayouterWelcomeTourTests
 	swift run DeskLayouterWhatsNewTests
+	swift run DeskLayouterSceneRenderTests
 
 test-desktop-placement:
 	./Scripts/verify-desktop-placement.sh

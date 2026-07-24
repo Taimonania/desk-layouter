@@ -39,3 +39,15 @@ _Avoid_: Tile, arrangement, region, split.
 **Arrange**:
 Enacting Layouts at runtime by positioning and sizing each application's window via the Accessibility API. Distinct from Apply: Apply writes the Spaces store, Arrange moves live windows. It only affects the currently active Desktop directly; other Desktops with Layouts are arranged once each, the first time they become active after Arrange is triggered, after which the app stops observing.
 _Avoid_: Apply, tile, layout (the verb), snap.
+
+**Scene**:
+A named, fabricated app state — a Display topology, a seeded board, and/or a forced surface (like the What's-New card) — built from the model's existing pure/injectable seams and rendered offscreen to a PNG under `.build/scene-renders/<key>.png` by the app's `--render-scene` mode. A Scene touches no real hardware, Spaces, permission, or the user's saved board; it is a _depiction_ of a state for visual review, never proof macOS enacted a layout. Curated into a small catalog of reusable scaffolding, not a grow-forever regression suite.
+_Avoid_: Snapshot (reserved for point-in-time reads of live macOS state — see below), fixture, screenshot.
+
+**Acceptance Review**:
+A verification step that renders the app's own SwiftUI views offscreen as Scenes and judges each UI-observable acceptance criterion against the resulting PNG — no Screen Recording (TCC) permission, no physical Display, worktree-isolated. It complements code-review (which reads the diff and spec but never looks at the running UI) and feeds the existing `AGENTS.md` merge bar: a UI criterion that renders wrong or can't be visually confirmed counts as not genuinely met.
+_Avoid_: Snapshot testing, visual regression, screenshot test.
+
+**Snapshot**:
+A point-in-time read of live macOS state (`DesktopSnapshot`, `DisplayTopologySnapshot`). Deliberately distinct from a Scene, which is a _fabricated_ state rendered for review rather than a read of the real system.
+_Avoid_: Scene (a fabricated state, not a read).
