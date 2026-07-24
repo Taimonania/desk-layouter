@@ -23,6 +23,14 @@ assumes they already exist; `make release-preflight` confirms them.
 - **gh account:** every `gh` command uses `GH_HOST=github.com` with the `Taimonania`
   account (`GH_HOST=github.com gh auth switch --user Taimonania`). Never the personal
   account — it lacks push/merge rights.
+- **Release prep lands on `main` via PR — always, no need to ask.** The version bump
+  and `CHANGELOG.md` entry go on a `release/<version>` branch, opened as a PR and merged
+  into `main` *before* publishing; the `vX.Y.Z` tag is created on that merge commit
+  (matching every prior release). Never publish from an unmerged branch, and never ask
+  the user whether to merge first — it's the standard flow. (`main` is often checked out
+  in another git worktree, so `git checkout main` in this workspace may fail with
+  "already used by worktree" — that's expected; do the prep on the `release/<version>`
+  branch and fast-forward to the merge commit after the PR merges.)
 - **Publishing is irreversible and public.** The `RELEASE_PUBLISH=1` env var gates it.
   Never set it until the dry run is clean and the user has authorized the publish.
 - The signing identity (`Developer ID Application: Timo Angerer (Q353FAS349)`) and the
@@ -33,9 +41,13 @@ assumes they already exist; `make release-preflight` confirms them.
 ### 1. Preflight
 `make release-preflight` — reports every missing tool/credential at once. Fix before continuing.
 
-### 2. Bump the version
-Edit `App/Info.plist`: raise `CFBundleShortVersionString` (SemVer) and `CFBundleVersion`
-(next integer). Nothing else needs editing to change the version.
+### 2. Create the release branch and bump the version
+From an up-to-date `main` tip, create a `release/<version>` branch (e.g.
+`git checkout -b release/0.4.0`). All prep commits — the version bump and the
+CHANGELOG entry — go here, to be merged into `main` via PR in step 6.
+
+Then edit `App/Info.plist`: raise `CFBundleShortVersionString` (SemVer) and
+`CFBundleVersion` (next integer). Nothing else needs editing to change the version.
 
 ### 3. Write the release notes
 Add the new version's entry to `CHANGELOG.md`: a `## <version> — <date>` section
@@ -92,14 +104,25 @@ the user verbatim:
 make release-notes
 ```
 This prints what `publish` feeds to `gh release create` — the `## Highlights`
-block derived from `CHANGELOG.md` — without building or publishing anything. Publishing (step 6) is the point of no return, so
+block derived from `CHANGELOG.md` — without building or publishing anything. Publishing (step 7) is the point of no return, so
 this is the last moment the notes can change: to revise them, edit `CHANGELOG.md`
 and re-run `make release-notes`. (Editing `CHANGELOG.md` after the dry run also
 changes the What's-New content bundled into the app, so re-run the dry run in step
 4 before publishing if you change it here.) **Wait for the user's explicit approval
 of these notes before continuing to publish.**
 
-### 6. Publish (irreversible — requires the user's authorization)
+### 6. Merge the release-prep PR into `main`
+Commit the prep on the `release/<version>` branch, push it, open a PR against `main`,
+and merge it (the `Taimonania` account has merge rights). Then bring this workspace's
+checkout to the merge commit so the tag lands there:
+```sh
+git fetch origin main
+git merge --ff-only origin/main   # release/<version> now points at the main merge commit
+```
+Confirm `git log -1` is the merge commit and `HEAD` matches `origin/main` before
+publishing — the `vX.Y.Z` tag is created on `HEAD`, and it must be on `main`.
+
+### 7. Publish (irreversible — requires the user's authorization)
 ```sh
 RELEASE_PUBLISH=1 make release
 ```
@@ -111,10 +134,10 @@ Creates the GitHub Release (uploads `.dmg` + `.zip`), then pushes `appcast.xml` 
 - **Pages-rebuild race (expected):** after the push, GitHub Pages takes ~30–120s to
   serve the new `appcast.xml`. `make release` runs its `verify` step immediately, so it
   can fail *only* on the appcast-availability check while Pages is still rebuilding. That
-  specific failure is not a real problem — re-assert in step 7 once the feed is live.
+  specific failure is not a real problem — re-assert in step 8 once the feed is live.
   Any other failure is real.
 
-### 7. Verify availability
+### 8. Verify availability
 Poll the feed until Pages has rebuilt, then assert everything:
 ```sh
 until [ "$(curl -sI -o /dev/null -w '%{http_code}' https://taimonania.github.io/desk-layouter/appcast.xml)" = 200 ]; do sleep 10; done
@@ -126,7 +149,7 @@ stapled ticket; and availability — every published asset URL returns 200, the 
 `.dmg` checksum matches the local artifact, the appcast returns 200 and parses, its newest
 `<enclosure>` carries a non-empty `sparkle:edSignature`, and that enclosure URL returns 200.
 
-### 8. Confirm
+### 9. Confirm
 Report the release URL and that existing installs will now be offered the update.
 
 ## When the signing/update mechanism changes — not a normal release step

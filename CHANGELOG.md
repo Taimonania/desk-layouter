@@ -6,6 +6,11 @@ highlights (newest first). The app bundles this file and shows the newest
 highlights on the first launch after an upgrade (the What's-New screen); the
 release pipeline derives each GitHub release's notes from the matching section.
 
+## 0.4.0 — 2026-07-24
+
+- **Enable more rows and columns for your Layout**. You can now split any axis into a custom number of sections — anywhere from 5 up to 9 columns or rows — right in the Layout editor, alongside the existing Full, Halves, Thirds, and Fourths presets.
+- **A clearer first-run Welcome tour**. The tour's callout now sizes to its content instead of parking a large empty card over the board, so it no longer covers the controls it points at, and its body text is larger and easier to read.
+
 ## 0.3.0 — 2026-07-22
 
 - Multi-Display support.
