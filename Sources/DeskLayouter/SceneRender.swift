@@ -33,7 +33,7 @@ enum SceneCatalog {
     /// Every catalog Scene, in a stable order. `--render-scene all` (and a bare
     /// `--render-scene`) renders each of these.
     static var all: [Scene] {
-        [whatsNew, editorTwoDisplays, editorSingleDisplay]
+        [whatsNew, editorTwoDisplays, editorSingleDisplay, updateReminderBoard, updateReminderSettings]
     }
 
     /// The available Scene keys, for the unknown-key error message.
@@ -172,6 +172,89 @@ enum SceneCatalog {
         )
     }
 
+    /// The update-reminder toast over the board (issue #127). Renders the real
+    /// `AppRootView` — not the bare `EditorView` — so its bottom toast overlay draws.
+    /// A background-found update is recorded through the app's real seams
+    /// (`AppRootModel.recordFoundUpdate` → the pure `UpdateReminder` seam), so the
+    /// toast this Scene shows is exactly what a live background check produces. Backed
+    /// by throwaway per-process stores, seeded so neither the Welcome tour nor the
+    /// What's-New surface pre-empts the board.
+    static let updateReminderBoard = Scene(
+        key: "update-reminder-board",
+        size: CGSize(width: 1024, height: 720)
+    ) {
+        buildUpdateReminderScene(onSettings: false)
+    }
+
+    /// The update-reminder toast over the Settings surface (issue #127). Same
+    /// fabrication as ``updateReminderBoard``, then `AppRootModel.showSettings()`
+    /// swaps the surface — the seam keeps the toast visible on Settings, so this
+    /// Scene confirms the toast renders over Settings, not just the board.
+    static let updateReminderSettings = Scene(
+        key: "update-reminder-settings",
+        size: CGSize(width: 1024, height: 720)
+    ) {
+        buildUpdateReminderScene(onSettings: true)
+    }
+
+    /// Builds an `AppRootView` with a pending background-found update, on the board
+    /// or (when `onSettings`) the Settings surface. Everything runs through real
+    /// seams and throwaway per-process stores, so nothing real is touched.
+    @MainActor
+    private static func buildUpdateReminderScene(onSettings: Bool) -> AnyView {
+        let builtIn = DisplayIdentity(
+            colorSyncUUID: "SCENE-UPDATE",
+            lastKnownName: "Built-in Display",
+            vendorID: 4,
+            modelID: 40,
+            serialNumber: 400
+        )
+        let topology = DisplayTopologySnapshot(
+            displaysHaveSeparateSpaces: true,
+            automaticallyRearrangesSpaces: false,
+            sections: [
+                sceneSection(primary: builtIn, main: true, x: 0, desktops: ["D1", "D2", "D3"]),
+            ]
+        )
+        let editorModel = buildEditorModel(
+            topology: topology,
+            placements: [
+                Placement(app: SceneApps.safari, display: builtIn, desktop: 1),
+                Placement(app: SceneApps.terminal, display: builtIn, desktop: 2),
+                Placement(app: SceneApps.notes, display: builtIn, desktop: 3),
+            ]
+        )
+
+        // Throwaway defaults seeded so first-run surfaces do not pre-empt the toast:
+        // hasSeenWelcome true (no tour overlay) and lastSeenVersion == currentVersion
+        // (What's-New's onLaunch returns .none for an equal version).
+        let defaults = UserDefaults(suiteName: "scene-render-\(UUID().uuidString)") ?? .standard
+        let appState = AppStateStore(defaults: defaults)
+        appState.hasSeenWelcome = true
+        appState.lastSeenVersion = "0.4.2"
+
+        let model = AppRootModel(
+            appState: appState,
+            currentVersion: "0.4.2",
+            changelogText: nil
+        )
+        // Record a background-found update through the real seam — handledBySparkle
+        // false is the gentle-reminder (background) path that shows the toast.
+        model.recordFoundUpdate(handledBySparkle: false, versionName: "0.4.3")
+        if onSettings {
+            model.showSettings()
+        }
+
+        return AnyView(
+            AppRootView(
+                model: model,
+                editorModel: editorModel,
+                quit: {},
+                checkForUpdates: {}
+            )
+        )
+    }
+
     /// One app to place on a fabricated Desktop while building an editor Scene.
     private struct Placement {
         let app: InstalledApplication
@@ -191,6 +274,26 @@ enum SceneCatalog {
         topology: DisplayTopologySnapshot,
         placements: [Placement]
     ) -> AnyView {
+        let model = buildEditorModel(topology: topology, placements: placements)
+        return AnyView(
+            EditorView(
+                model: model,
+                quit: {},
+                checkForUpdates: {},
+                openSettings: {},
+                openHelp: {}
+            )
+        )
+    }
+
+    /// Builds just the `EditorModel` from fabricated seams, so callers that need the
+    /// board embedded in a larger view (e.g. the update-reminder Scenes, which render
+    /// `AppRootView` to get its toast overlay) can reuse the exact same fabrication.
+    @MainActor
+    private static func buildEditorModel(
+        topology: DisplayTopologySnapshot,
+        placements: [Placement]
+    ) -> EditorModel {
         let apps = orderedUnique(placements.map(\.app))
 
         // Seed the board with the placed apps (at Desktop 1) so they are already
@@ -232,15 +335,7 @@ enum SceneCatalog {
             )
         }
 
-        return AnyView(
-            EditorView(
-                model: model,
-                quit: {},
-                checkForUpdates: {},
-                openSettings: {},
-                openHelp: {}
-            )
-        )
+        return model
     }
 
     /// A `DisplayDesktopSectionSnapshot` for one physical Display, mirroring the

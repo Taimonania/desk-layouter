@@ -20,14 +20,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // the app-level preferences the Settings screen edits.
     private lazy var rootModel = AppRootModel(appState: appState)
 
+    // The Sparkle user-driver delegate for the gentle-reminder path (issue #127): a
+    // translation shim that declares gentle-reminder support (silencing Sparkle's
+    // launch warning), suppresses Sparkle's scheduled-update window, and forwards
+    // found-update and dismissal events into the `AppRootModel`'s pure seam. It is
+    // an initializer parameter of the updater controller and so must exist before
+    // it, which is why the controller below is lazy.
+    private lazy var userDriverDelegate = UpdateReminderUserDriverDelegate(
+        onFoundUpdate: { [weak self] handledBySparkle, versionName in
+            self?.rootModel.recordFoundUpdate(handledBySparkle: handledBySparkle, versionName: versionName)
+        },
+        onDismiss: { [weak self] in
+            self?.rootModel.dismissUpdateReminder()
+        }
+    )
+
     // Sparkle's standard controller owns the whole update flow (scheduling, UI,
-    // signature checks). It reads SUFeedURL/SUPublicEDKey from Info.plist and
-    // starts checking on its own once created; `checkForUpdates:` is the manual
-    // entry point wired to the menu item below.
-    private let updaterController = SPUStandardUpdaterController(
+    // signature checks). It reads SUFeedURL/SUPublicEDKey (and the
+    // SUScheduledCheckInterval) from Info.plist and starts checking on its own once
+    // created; `checkForUpdates:` is the manual entry point wired to the menu item
+    // below. Lazily initialized so `userDriverDelegate` exists first; its first use
+    // stays in `applicationDidFinishLaunching`, so the updater starts at launch as
+    // before.
+    private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
-        userDriverDelegate: nil
+        userDriverDelegate: userDriverDelegate
     )
 
     /// Owns the editor window's open/focus/reuse lifecycle (issue #40). The window

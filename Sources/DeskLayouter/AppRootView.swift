@@ -19,6 +19,27 @@ struct AppRootView: View {
 
     var body: some View {
         surface
+            // The update reminder floats as a bottom overlay so it is not tied to a
+            // single surface (issue #127): the pure `UpdateReminder` seam decides it
+            // is visible on the board and Settings and hidden on What's-New. Install
+            // reuses the existing `checkForUpdates` closure — because an update
+            // session is already in progress, Sparkle brings its dialog into focus
+            // rather than starting a fresh check — then dismisses the toast; Later
+            // just dismisses. Neither steals focus.
+            .overlay(alignment: .bottom) {
+                if model.updateReminder.isToastVisible(on: model.navigation.surface),
+                    let message = model.updateReminder.toastMessage {
+                    UpdateReminderToast(
+                        message: message,
+                        onInstall: {
+                            checkForUpdates()
+                            model.dismissUpdateReminder()
+                        },
+                        onLater: { model.dismissUpdateReminder() }
+                    )
+                    .padding(20)
+                }
+            }
             // The Welcome tour floats over the board as a live spotlight overlay
             // (issue #72). It reads the anchors the board's controls publish so it
             // can dim around them; the overlay is shown only over the board, the
