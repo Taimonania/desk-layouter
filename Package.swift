@@ -24,6 +24,7 @@ let package = Package(
                 "AppDelegate.swift", "EditorModel.swift", "EditorView.swift", "LayoutEditorView.swift",
                 "AppRootModel.swift", "AppRootView.swift", "SettingsView.swift", "WelcomeTourOverlay.swift",
                 "WhatsNewView.swift", "BundledChangelog.swift", "HoverTooltip.swift", "SceneRender.swift",
+                "UpdateReminderToast.swift", "UpdateReminderUserDriverDelegate.swift",
             ],
             sources: [
                 "SpacesAdapter.swift",
@@ -47,6 +48,7 @@ let package = Package(
                 "SupportReport.swift",
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
+                "UpdateReminder.swift",
                 "InlineMarkdown.swift",
                 "SceneRenderArguments.swift",
             ]
@@ -81,6 +83,7 @@ let package = Package(
                 "SupportReport.swift",
                 "WelcomeTour.swift",
                 "WhatsNew.swift",
+                "UpdateReminder.swift",
                 "InlineMarkdown.swift",
                 "SceneRenderArguments.swift",
             ]
@@ -249,6 +252,11 @@ let package = Package(
             name: "DeskLayouterWhatsNewTests",
             dependencies: ["DeskLayouterCore", "DeskLayouterMacOS"],
             path: "Tests/DeskLayouterWhatsNewTests"
+        ),
+        .executableTarget(
+            name: "DeskLayouterUpdateReminderTests",
+            dependencies: ["DeskLayouterMacOS"],
+            path: "Tests/DeskLayouterUpdateReminderTests"
         ),
         .executableTarget(
             name: "DeskLayouterSceneRenderTests",

@@ -58,6 +58,7 @@ test:
 	swift run DeskLayouterAppStateTests
 	swift run DeskLayouterWelcomeTourTests
 	swift run DeskLayouterWhatsNewTests
+	swift run DeskLayouterUpdateReminderTests
 	swift run DeskLayouterSceneRenderTests
 
 test-desktop-placement:

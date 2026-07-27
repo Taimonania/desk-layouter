@@ -25,6 +25,14 @@ final class AppRootModel: ObservableObject {
     /// seam decides, and this model persists `lastSeenVersion` in response.
     @Published private(set) var whatsNew: WhatsNew?
 
+    /// The in-app update reminder's state (issue #127): a pending background-found
+    /// update drives the editor-window toast. Seeded empty — nothing is pending until
+    /// a background check finds an update — and mutated only through the pure
+    /// `UpdateReminder` seam, which owns every decision (the user-initiated-check
+    /// guard, per-surface toast visibility, the display string, and dismissal).
+    /// Republishing lets the root view show and hide the toast.
+    @Published private(set) var updateReminder = UpdateReminder()
+
     private let appState: AppStateStore
 
     /// - Parameters:
@@ -112,5 +120,20 @@ final class AppRootModel: ObservableObject {
         whatsNew?.dismiss()
         appState.lastSeenVersion = version
         navigation.showBoard()
+    }
+
+    /// Records a found update, forwarded from the Sparkle user-driver delegate shim
+    /// (issue #127). A user-initiated "Check for Updates…" (`handledBySparkle`)
+    /// records nothing, so an explicit check gets Sparkle's dialog and never a toast;
+    /// a background check records a pending update, showing the toast.
+    func recordFoundUpdate(handledBySparkle: Bool, versionName: String?) {
+        updateReminder.recordFoundUpdate(handledBySparkle: handledBySparkle, versionName: versionName)
+    }
+
+    /// Dismisses the update reminder — the Later button, the user opening Sparkle's
+    /// dialog from Install, and the update session ending all route here. The toast
+    /// clears; a later background check re-shows it.
+    func dismissUpdateReminder() {
+        updateReminder.dismiss()
     }
 }
