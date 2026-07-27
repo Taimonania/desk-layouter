@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CoreGraphics
 import DeskLayouterCore
 import DeskLayouterMacOS
@@ -10,6 +11,9 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let editorModel = EditorModel()
+
+    // Keeps the badge subscription alive for the app's lifetime (issue #128).
+    private var cancellables = Set<AnyCancellable>()
 
     // App-level preferences that live outside the board/preset domain model —
     // currently just the automatic-update-install choice (issue #71), persisted in
@@ -88,11 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(
-                systemSymbolName: "rectangle.3.group",
-                accessibilityDescription: "Desk Layouter"
-            )
-            button.image?.isTemplate = true
+            button.image = Self.statusItemImage(badged: false)
             button.toolTip = "Desk Layouter"
             // The menu-bar icon keeps the editor as its primary entry point (issue
             // #40): a left-click opens it, or focuses the existing window when it is
@@ -104,6 +104,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         self.statusItem = statusItem
+
+        // Drive the menu-bar badge from the same pending-update state the toast reads
+        // (issue #128), so the two surfaces can never disagree. Badge visibility is a
+        // property of that state alone — independent of the window's surface or of
+        // whether the window is open at all — so the icon carries the badge for as
+        // long as an update is pending and clears it on dismissal, attention, or
+        // session end. `@Published` delivers the current value on subscription, so
+        // the icon starts in the right state too.
+        rootModel.$updateReminder
+            .map(\.isBadgeVisible)
+            .removeDuplicates()
+            .sink { [weak self] badged in
+                self?.statusItem?.button?.image = Self.statusItemImage(badged: badged)
+            }
+            .store(in: &cancellables)
 
         startObservingDisplayReconfiguration()
 
@@ -174,6 +189,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    /// The status-item image: the app's `rectangle.3.group` symbol, with a small
+    /// filled dot composed into the top-right corner while an update is pending
+    /// (issue #128). Both the plain and badged images are returned as *template*
+    /// images so AppKit tints them to the current menu bar, which keeps the dot
+    /// monochrome and adapting to light and dark rather than a fixed colour.
+    ///
+    /// This AppKit image composition is deliberately not unit tested — the status
+    /// item is not a SwiftUI scene, so `--render-scene` cannot reach it, and the
+    /// badge's legibility in a real menu bar needs manual verification. The *decision*
+    /// of when to badge lives in the pure `UpdateReminder` seam and is tested there.
+    private static func statusItemImage(badged: Bool) -> NSImage? {
+        let base = NSImage(
+            systemSymbolName: "rectangle.3.group",
+            accessibilityDescription: badged ? "Desk Layouter — update available" : "Desk Layouter"
+        )
+        base?.isTemplate = true
+
+        guard badged, let base else {
+            return base
+        }
+
+        let size = base.size
+        let composed = NSImage(size: size)
+        composed.lockFocus()
+        base.draw(in: NSRect(origin: .zero, size: size))
+
+        // A small dot in the top-right corner, with a transparent halo knocked out
+        // first so the badge reads as a distinct mark rather than merging into the
+        // symbol's strokes — keeping the badged icon recognisable as the same app.
+        // Sizes are fractions of the icon height so the badge scales with the symbol:
+        // a dot a little under half the icon, nudged in from the corner, ringed by a
+        // thin transparent gap.
+        let dotFraction = 0.42
+        let cornerInsetFraction = 0.08
+        let haloFraction = 0.06
+
+        let dotDiameter = (size.height * dotFraction).rounded()
+        let cornerInset = (size.height * cornerInsetFraction).rounded()
+        let dotRect = NSRect(
+            x: size.width - dotDiameter - cornerInset,
+            y: size.height - dotDiameter - cornerInset,
+            width: dotDiameter,
+            height: dotDiameter
+        )
+        let haloWidth = (size.height * haloFraction).rounded()
+        let haloRect = dotRect.insetBy(dx: -haloWidth, dy: -haloWidth)
+
+        if let context = NSGraphicsContext.current {
+            context.compositingOperation = .clear
+            NSBezierPath(ovalIn: haloRect).fill()
+            context.compositingOperation = .sourceOver
+        }
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+
+        composed.unlockFocus()
+        composed.isTemplate = true
+        return composed
     }
 
     private func makeEditorWindow() -> NSWindow {

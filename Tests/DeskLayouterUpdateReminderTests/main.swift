@@ -79,6 +79,51 @@ struct UpdateReminderTestRunner {
             )
         }
 
+        // MARK: - Menu-bar badge visibility is a property of the pending state (#128)
+
+        do {
+            var reminder = UpdateReminder()
+            check("no badge before any check", !reminder.isBadgeVisible)
+
+            reminder.recordFoundUpdate(handledBySparkle: false, versionName: "0.4.2")
+            check("a background check shows the badge", reminder.isBadgeVisible)
+        }
+
+        do {
+            var reminder = UpdateReminder()
+            reminder.recordFoundUpdate(handledBySparkle: true, versionName: "0.4.2")
+            check("no badge for a Sparkle-handled (user-initiated) update", !reminder.isBadgeVisible)
+        }
+
+        do {
+            // The badge is independent of the surface the window is showing: the toast
+            // hides on What's-New while the badge stays lit, and the badge is lit on
+            // every surface for the same pending update.
+            var reminder = UpdateReminder()
+            reminder.recordFoundUpdate(handledBySparkle: false, versionName: "0.4.2")
+            check("the badge is lit while on the board", reminder.isBadgeVisible)
+            check("the badge stays lit on Settings", reminder.isBadgeVisible)
+            check(
+                "the badge stays lit on What's-New even though the toast is hidden there",
+                reminder.isBadgeVisible && !reminder.isToastVisible(on: .whatsNew)
+            )
+        }
+
+        do {
+            var reminder = UpdateReminder()
+            reminder.recordFoundUpdate(handledBySparkle: false, versionName: "0.4.2")
+            reminder.dismiss()
+            check("dismiss clears the badge", !reminder.isBadgeVisible)
+        }
+
+        do {
+            var reminder = UpdateReminder()
+            reminder.recordFoundUpdate(handledBySparkle: false, versionName: "0.4.2")
+            reminder.dismiss()
+            reminder.recordFoundUpdate(handledBySparkle: false, versionName: "0.4.3")
+            check("a later found update re-lights the badge", reminder.isBadgeVisible)
+        }
+
         // MARK: - Version-name fallback (never renders an empty string)
 
         do {
