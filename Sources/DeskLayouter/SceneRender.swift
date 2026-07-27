@@ -33,7 +33,7 @@ enum SceneCatalog {
     /// Every catalog Scene, in a stable order. `--render-scene all` (and a bare
     /// `--render-scene`) renders each of these.
     static var all: [Scene] {
-        [whatsNew, editorTwoDisplays, editorSingleDisplay, updateReminderBoard, updateReminderSettings]
+        [whatsNew, editorTwoDisplays, editorSingleDisplay, editorLayoutCustom, updateReminderBoard, updateReminderSettings]
     }
 
     /// The available Scene keys, for the unknown-key error message.
@@ -170,6 +170,54 @@ enum SceneCatalog {
                 Placement(app: SceneApps.notes, display: builtIn, desktop: 3),
             ]
         )
+    }
+
+    /// The Layout editor sheet with `Custom` selected on both axes (issue #130).
+    /// The card carries a Layout whose horizontal and vertical divisions are both
+    /// `Custom`, so `LayoutEditorView` renders the `parts` dropdown next to the
+    /// segmented control on each axis — the visual acceptance surface for the
+    /// same-line layout and 710pt sheet width. Backed by a throwaway per-process
+    /// `EditorModel` (used only by the sheet's Save/Clear actions) so nothing real
+    /// is touched. Sized generously so the fixed-width sheet sits within the frame.
+    static let editorLayoutCustom = Scene(
+        key: "editor-layout-custom",
+        size: CGSize(width: 780, height: 560)
+    ) {
+        let builtIn = DisplayIdentity(
+            colorSyncUUID: "SCENE-LAYOUT-EDITOR",
+            lastKnownName: "Built-in Display",
+            vendorID: 5,
+            modelID: 50,
+            serialNumber: 500
+        )
+        let topology = DisplayTopologySnapshot(
+            displaysHaveSeparateSpaces: true,
+            automaticallyRearrangesSpaces: false,
+            sections: [
+                sceneSection(primary: builtIn, main: true, x: 0, desktops: ["D1"]),
+            ]
+        )
+        let model = buildEditorModel(
+            topology: topology,
+            placements: [Placement(app: SceneApps.safari, display: builtIn, desktop: 1)]
+        )
+
+        // A Layout with both axes Custom so both parts dropdowns render.
+        let layout = Layout(
+            horizontalDivision: .custom(6),
+            verticalDivision: .custom(7),
+            columnSpan: LayoutSpan(start: 1, end: 2),
+            rowSpan: LayoutSpan(start: 0, end: 1)
+        )
+        let card = BoardCard(
+            bundleIdentifier: SceneApps.safari.bundleIdentifier,
+            displayName: SceneApps.safari.displayName,
+            desktopNumber: 1,
+            display: builtIn,
+            layout: layout
+        )
+
+        return AnyView(LayoutEditorView(model: model, card: card))
     }
 
     /// The update-reminder toast over the board (issue #127). Renders the real
