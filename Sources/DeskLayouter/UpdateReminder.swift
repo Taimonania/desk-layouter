@@ -79,6 +79,18 @@ public struct UpdateReminder: Equatable, Sendable {
         }
     }
 
+    /// Whether the menu-bar icon should carry its pending-update badge (issue #128).
+    /// True for exactly as long as an update is pending, so the badge and the toast
+    /// can never disagree — they read the same `pending` value. Unlike the toast, the
+    /// badge takes no surface: it is a property of the pending-update state alone, so
+    /// it is unaffected by which surface the window is showing or by whether the
+    /// window is open at all. Dismissal (Later, user attention, or session end) clears
+    /// `pending` and so clears the badge in the same step, never leaving a stale
+    /// signal.
+    public var isBadgeVisible: Bool {
+        pending != nil
+    }
+
     /// The toast's headline, naming the version when the appcast supplied one and
     /// falling back to generic wording otherwise — never an empty string. `nil` when
     /// nothing is pending.
