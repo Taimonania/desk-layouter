@@ -4,11 +4,10 @@ import Foundation
 /// (issue #127, epic #126). When a *background* update check finds a new version,
 /// the app — a menu-bar (accessory) app whose Sparkle window would otherwise open
 /// unseen behind everything else — shows a quiet toast in the editor window naming
-/// the version, plus a small badge on the menu-bar icon. This value type owns only
-/// the *logic*: recording a found update, the guard that ignores updates Sparkle is
-/// presenting itself (so a user-initiated "Check for Updates…" never produces a
-/// toast), toast visibility per surface, badge visibility, the display string and
-/// its fallback, and dismissal.
+/// the version. This value type owns only the *logic*: recording a found update,
+/// the guard that ignores updates Sparkle is presenting itself (so a user-initiated
+/// "Check for Updates…" never produces a toast), toast visibility per surface, the
+/// display string and its fallback, and dismissal.
 ///
 /// It is a pure value type on the testable target's source list, alongside the
 /// comparable `WhatsNew` and `WelcomeTour` seams, so the invisible-window behaviour
@@ -36,8 +35,11 @@ public struct UpdateReminder: Equatable, Sendable {
     }
 
     /// The update currently pending the user's attention, or `nil` when none is —
-    /// nothing found yet, or the reminder was dismissed. Every surface (toast and
-    /// badge) is a function of this one value.
+    /// nothing found yet, or the reminder was dismissed. The toast is a function of
+    /// this one value. It is a wrapper rather than a bare `String?` so that "no
+    /// update pending" stays distinct from "an update is pending but the appcast
+    /// supplied no version name" — the latter still shows the toast, with generic
+    /// fallback wording.
     public private(set) var pending: PendingUpdate?
 
     public init(pending: PendingUpdate? = nil) {

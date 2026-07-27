@@ -61,25 +61,33 @@ final class UpdateReminderUserDriverDelegate: NSObject, SPUStandardUserDriverDel
         state: SPUUserUpdateState
     ) {
         let versionName = update.displayVersionString
-        // Copy the closure to a local so the main-actor closure captures the closure
-        // value, not `self` (which is task-isolated here).
-        let forward = onFoundUpdate
-        MainActor.assumeIsolated {
-            forward(handleShowingUpdate, versionName)
-        }
+        forwardFoundUpdate(handleShowingUpdate, versionName)
     }
 
     /// The user gave the update its attention (opened Sparkle's dialog). Dismiss the
     /// toast so the user is not looking at two prompts for the same thing.
     nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        let dismiss = onDismiss
-        MainActor.assumeIsolated {
-            dismiss()
-        }
+        forwardDismiss()
     }
 
     /// The update session ended. Dismiss the toast so no stale reminder lingers.
     nonisolated func standardUserDriverWillFinishUpdateSession() {
+        forwardDismiss()
+    }
+
+    // Sparkle delivers the delegate callbacks on the main thread, so these hop onto
+    // the main actor with `assumeIsolated`. The closure is copied to a local first so
+    // the main-actor closure captures the closure value, not `self` (task-isolated
+    // in a `nonisolated` method).
+
+    private nonisolated func forwardFoundUpdate(_ handledBySparkle: Bool, _ versionName: String?) {
+        let forward = onFoundUpdate
+        MainActor.assumeIsolated {
+            forward(handledBySparkle, versionName)
+        }
+    }
+
+    private nonisolated func forwardDismiss() {
         let dismiss = onDismiss
         MainActor.assumeIsolated {
             dismiss()
