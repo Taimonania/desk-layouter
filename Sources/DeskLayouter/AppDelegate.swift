@@ -90,6 +90,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updaterController.updater.automaticallyChecksForUpdates = true
         updaterController.updater.automaticallyDownloadsUpdates = appState.automaticallyInstallUpdates
 
+        // Check once on every launch so quitting and reopening is a reliable way to
+        // discover a pending update, rather than depending on where the four-hour
+        // scheduler happens to sit (issue #129). `checkForUpdatesInBackground()` is
+        // Sparkle's supported entry point for forcing a launch check: it routes
+        // through the gentle-reminder path (so a discovery yields the toast, not a
+        // modal) and does not resurface versions the user has skipped — unlike the
+        // manual `checkForUpdates(nil)`, which correctly does resurface them. It must
+        // be called here, immediately after the automatic-check settings are applied;
+        // Sparkle's docs warn that calling it later can interfere with the scheduler.
+        // Gated on automatic checking being enabled so a user who has turned checks
+        // off is not force-checked on launch; today that is always true, but the guard
+        // keeps the launch check honouring the setting if it ever becomes toggleable.
+        // A failed check stays silent — the background path surfaces no error.
+        if updaterController.updater.automaticallyChecksForUpdates {
+            updaterController.updater.checkForUpdatesInBackground()
+        }
+
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
             button.image = Self.statusItemImage(badged: false)
