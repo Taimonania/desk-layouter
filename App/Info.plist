@@ -33,6 +33,15 @@
 	<!-- Sparkle auto-update configuration (issue #45). -->
 	<key>SUFeedURL</key>
 	<string>https://taimonania.github.io/desk-layouter/appcast.xml</string>
+	<!-- Scheduled update-check interval: every four hours (issue #129). Set here as
+	     bundle configuration rather than programmatically on the updater: Sparkle
+	     persists that property into the host bundle's user defaults, and user defaults
+	     override this Info.plist value. Setting it at launch would burn 14400 into
+	     every existing install permanently and make any future change to the interval
+	     unreachable for those users. Sparkle clamps the effective interval to a
+	     one-hour minimum in release builds, so four hours is well within range. -->
+	<key>SUScheduledCheckInterval</key>
+	<integer>14400</integer>
 	<!-- EdDSA public key from Sparkle's `generate_keys`; the matching private key
 	     is held out of band and signs every appcast enclosure. Rotating it would
 	     invalidate installed clients' ability to verify updates. -->
