@@ -125,7 +125,7 @@ struct LayoutEditorView: View {
             footer
         }
         .padding(20)
-        .frame(width: 500)
+        .frame(width: 710)
     }
 
     // MARK: - Controls
@@ -178,7 +178,8 @@ struct LayoutEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-            Picker("Division", selection: segmentBinding(division)) {
+
+            let segmentedControl = Picker("Division", selection: segmentBinding(division)) {
                 ForEach(DivisionSegment.allCases, id: \.self) { segment in
                     Text(Self.segmentName(segment)).tag(segment)
                 }
@@ -187,7 +188,7 @@ struct LayoutEditorView: View {
             .pickerStyle(.segmented)
 
             if division.wrappedValue.isCustom {
-                Picker("Parts", selection: customCountBinding(division)) {
+                let partsPicker = Picker("Parts", selection: customCountBinding(division)) {
                     ForEach(Array(Division.customCounts), id: \.self) { count in
                         Text("\(count) parts").tag(count)
                     }
@@ -196,6 +197,20 @@ struct LayoutEditorView: View {
                 .labelsHidden()
                 .fixedSize()
                 .accessibilityLabel("Custom part count")
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        segmentedControl
+                            .frame(maxWidth: .infinity)
+                        partsPicker
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        segmentedControl
+                        partsPicker
+                    }
+                }
+            } else {
+                segmentedControl
             }
 
             if !isFull {
