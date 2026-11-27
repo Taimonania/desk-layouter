@@ -6,6 +6,13 @@ highlights (newest first). The app bundles this file and shows the newest
 highlights on the first launch after an upgrade (the What's-New screen); the
 release pipeline derives each GitHub release's notes from the matching section.
 
+## 0.4.2 — 2026-11-27
+
+- **No more stuck "unrecognized format" error**. If reading your Desktops failed once (for example right after plugging in a monitor), the red error used to stay on screen even after everything worked again. It now clears itself, and the board re-reads your Desktops shortly after a display change.
+- **Apply can repair lost Desktop assignments**. If macOS forgets an app's Desktop on its own, the board now shows it as an unapplied change. Apply puts it back instead of saying there is nothing to apply.
+- **Know when an update is waiting**. A gentle in-app reminder and a dot on the menu-bar icon tell you when a new version is ready. Desk Layouter checks for updates at launch and every four hours.
+- **A tidier Layout editor**. The split options and the parts picker now fit on one line.
+
 ## 0.4.1 — 2026-07-24
 
 - **Correctly formatted What's New highlights**. The What's New screen now shows bold formatting properly instead of printing literal asterisks around the emphasized text.
