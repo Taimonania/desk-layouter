@@ -42,6 +42,21 @@ public enum DisplaySettingsPresentation {
         }
         return .none
     }
+
+    /// Feedback after a Desktop read succeeds. Whatever an earlier read put up
+    /// (a transient failure while Dock is still rewriting `com.apple.spaces`
+    /// after a Display change, or a settings notice) is cleared, so it cannot
+    /// pin a stale banner over a working board. Feedback from other actions
+    /// (Apply, Arrange, Presets) is kept.
+    public static func feedbackAfterSuccessfulRead(
+        current: EditorFeedback,
+        previousReadFeedback: EditorFeedback,
+        topology: DisplayTopologySnapshot
+    ) -> EditorFeedback {
+        let settings = feedback(for: topology)
+        if settings != .none { return settings }
+        return current == previousReadFeedback ? .none : current
+    }
 }
 
 /// The content shown in the editor's one shared status area.

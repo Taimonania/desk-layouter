@@ -64,6 +64,8 @@ final class EditorModel: ObservableObject {
     @Published private(set) var desktopCount = 0
     @Published private(set) var pendingChangeCount = 0
     @Published private(set) var feedback: EditorFeedback = .none
+    /// What the last Desktop read showed, so a later successful read can clear it.
+    private var lastDesktopReadFeedback: EditorFeedback = .none
 
     // Presets: the ordered library shown in the header selector, and the working
     // copy's required selected-Preset association.
@@ -258,14 +260,17 @@ final class EditorModel: ObservableObject {
             }?.orderedDesktopUUIDs.count ?? 0
             desktopCount = selectedCount
             newAssignmentDesktopNumber = min(max(newAssignmentDesktopNumber, 1), max(selectedCount, 1))
-            let settingsFeedback = DisplaySettingsPresentation.feedback(for: topology)
-            if settingsFeedback != .none {
-                feedback = settingsFeedback
-            }
+            feedback = DisplaySettingsPresentation.feedbackAfterSuccessfulRead(
+                current: feedback,
+                previousReadFeedback: lastDesktopReadFeedback,
+                topology: topology
+            )
+            lastDesktopReadFeedback = DisplaySettingsPresentation.feedback(for: topology)
         } catch {
             latestDisplayTopology = nil
             desktopCount = 0
             feedback = .failure(error.localizedDescription)
+            lastDesktopReadFeedback = feedback
         }
         refreshProjection()
     }

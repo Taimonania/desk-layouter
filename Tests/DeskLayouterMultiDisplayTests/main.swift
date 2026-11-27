@@ -227,6 +227,40 @@ struct MultiDisplayTestRunner {
                     && DisplaySettingsPresentation.feedback(for: sharedSpaces).message.contains("separate Spaces is off")
             )
 
+            // A failed Desktop read (e.g. Dock still rewriting com.apple.spaces
+            // after a Display change) must not pin its banner once a later read
+            // succeeds, while feedback from other actions survives the refresh.
+            let readFailure = EditorFeedback.failure(SpacesAdapterError.storeFormatChanged.localizedDescription)
+            let separateSpaces = DisplayTopologySnapshot(
+                displaysHaveSeparateSpaces: true,
+                automaticallyRearrangesSpaces: false,
+                sections: live.sections
+            )
+            check(
+                "a successful Desktop read clears the failure an earlier read left",
+                DisplaySettingsPresentation.feedbackAfterSuccessfulRead(
+                    current: readFailure,
+                    previousReadFeedback: readFailure,
+                    topology: separateSpaces
+                ) == .none
+            )
+            check(
+                "a successful Desktop read keeps feedback from other actions",
+                DisplaySettingsPresentation.feedbackAfterSuccessfulRead(
+                    current: .failure("Apply could not verify"),
+                    previousReadFeedback: .none,
+                    topology: separateSpaces
+                ) == .failure("Apply could not verify")
+            )
+            check(
+                "a successful Desktop read still surfaces Mission Control settings",
+                DisplaySettingsPresentation.feedbackAfterSuccessfulRead(
+                    current: readFailure,
+                    previousReadFeedback: readFailure,
+                    topology: sharedSpaces
+                ) == DisplaySettingsPresentation.feedback(for: sharedSpaces)
+            )
+
             let activeAdapter = MacOSSpacesAdapter(
                 commandRunner: runner,
                 sessionBindingUpdater: MultiSessionUpdater(),
