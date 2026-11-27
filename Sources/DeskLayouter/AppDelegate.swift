@@ -172,6 +172,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let delegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
             Task { @MainActor in
                 delegate.editorModel.refreshDesktops()
+                // Dock rewrites com.apple.spaces after the change, so the
+                // immediate read can miss the new Display's Desktops. Re-read
+                // once it has settled.
+                try? await Task.sleep(for: .seconds(2))
+                delegate.editorModel.refreshDesktops()
             }
         }, context)
     }
