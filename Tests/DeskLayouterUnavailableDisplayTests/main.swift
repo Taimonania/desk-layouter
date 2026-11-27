@@ -134,6 +134,44 @@ struct UnavailableDisplayTestRunner {
             check("offline semantic edit remains pending", board.pendingChanges(on: connected) == ["com.example.offline"])
         }
 
+        // macOS losing or changing an applied binding (#136) is Apply-pending so
+        // Apply can restore it; an unavailable Display's binding cannot be
+        // restored and must not dirty the board.
+        do {
+            var board = BoardState(configuration: DeskLayouterConfiguration(managedApplications: [
+                app("com.example.lost", display: builtIn, desktop: 2),
+                app("com.example.changed", display: builtIn, desktop: 1),
+                app("com.example.intact", display: builtIn, desktop: 2),
+                app("com.example.offline", display: external, desktop: 1),
+            ]))
+            board.markApplied(effectiveDesktopUUIDs: [
+                "com.example.lost": "B2",
+                "com.example.changed": "B1",
+                "com.example.intact": "B2",
+                "com.example.offline": "E1",
+            ])
+            let persisted = ["com.example.changed": "B2", "com.example.intact": "B2"]
+            check(
+                "missing or changed macOS bindings are Apply-pending",
+                board.pendingChanges(on: connected, persistedDesktopUUIDs: persisted)
+                    == ["com.example.changed", "com.example.lost"]
+            )
+            check(
+                "matching macOS bindings keep the board clean",
+                board.pendingChanges(on: connected, persistedDesktopUUIDs: [
+                    "com.example.lost": "B2",
+                    "com.example.changed": "B1",
+                    "com.example.intact": "B2",
+                ]).isEmpty
+            )
+            let plan = AssignmentPlanner().applyPlan(configuration: board.configuration, on: connected)
+            check(
+                "Apply can restore a lost binding",
+                plan.hasResolvableMutation(pendingBundleIdentifiers: ["com.example.lost"])
+                    && plan.updates["com.example.lost"] == "B2"
+            )
+        }
+
         // Recovery is offered only for one different connected identity matching
         // a complete, nonzero hardware tuple, and never applied until confirmed.
         do {
