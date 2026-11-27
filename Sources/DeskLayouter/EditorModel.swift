@@ -66,6 +66,9 @@ final class EditorModel: ObservableObject {
     @Published private(set) var feedback: EditorFeedback = .none
     /// What the last Desktop read showed, so a later successful read can clear it.
     private var lastDesktopReadFeedback: EditorFeedback = .none
+    /// The managed apps' bindings currently in macOS, so Apply can restore ones
+    /// macOS lost (#136). `nil` when unread; drift is then not detected.
+    private var persistedDesktopUUIDs: [String: String]?
 
     // Presets: the ordered library shown in the header selector, and the working
     // copy's required selected-Preset association.
@@ -432,7 +435,7 @@ final class EditorModel: ObservableObject {
             try spacesAdapter.apply(plan: plan, expectedTopology: topology)
             // Capture what changed in this Apply before advancing the baseline, so
             // the summary names only the apps whose Desktop actually changed.
-            let changedIdentifiers = Set(board.pendingChanges(on: topology))
+            let changedIdentifiers = Set(currentPendingChanges)
                 .intersection(plan.updates.keys)
             board.markApplied(plan)
             var message = appliedSummary(
@@ -1146,6 +1149,9 @@ final class EditorModel: ObservableObject {
             )
             displaySections = projection.sections
             unavailableDisplaySections = projection.unavailableDisplays
+            persistedDesktopUUIDs = try? spacesAdapter.persistedDesktopUUIDs(
+                for: Set(board.configuration.managedApplications.map(\.bundleIdentifier))
+            )
         } else {
             displaySections = []
             unavailableDisplaySections = []
@@ -1155,7 +1161,10 @@ final class EditorModel: ObservableObject {
 
     private var currentPendingChanges: [String] {
         if let topology = latestDisplayTopology {
-            return board.pendingChanges(on: topology)
+            return board.pendingChanges(
+                on: topology,
+                persistedDesktopUUIDs: persistedDesktopUUIDs
+            )
         }
         return board.pendingChanges
     }

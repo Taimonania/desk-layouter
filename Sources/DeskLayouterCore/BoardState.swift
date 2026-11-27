@@ -266,7 +266,15 @@ public struct BoardState: Codable, Equatable, Sendable {
 
     /// Multi-Display pending state. A topology role/geometry change is not a
     /// semantic edit, but a changed concrete Desktop UUID is still Apply-pending.
-    public func pendingChanges(on topology: DisplayTopologySnapshot?) -> [String] {
+    ///
+    /// When `persistedDesktopUUIDs` (bundle ID → Desktop UUID currently in
+    /// macOS's `app-bindings`) is supplied, an Assignment on an available
+    /// Display whose binding macOS lost or changed is also pending, so Apply can
+    /// restore it (#136).
+    public func pendingChanges(
+        on topology: DisplayTopologySnapshot?,
+        persistedDesktopUUIDs: [String: String]? = nil
+    ) -> [String] {
         let working = BoardState.baseline(from: configuration)
         var changed: Set<String> = []
         for (bundleIdentifier, destination) in working {
@@ -280,10 +288,14 @@ public struct BoardState: Codable, Equatable, Sendable {
             }
             if let topology,
                let display = destination.display,
-               let section = topology.section(containing: display),
-               section.concreteDesktopUUID(at: destination.desktopNumber)
+               let section = topology.section(containing: display) {
+                if section.concreteDesktopUUID(at: destination.desktopNumber)
                     != applied.concreteDesktopUUID {
-                changed.insert(bundleIdentifier)
+                    changed.insert(bundleIdentifier)
+                } else if let persistedDesktopUUIDs,
+                          persistedDesktopUUIDs[bundleIdentifier] != applied.concreteDesktopUUID {
+                    changed.insert(bundleIdentifier)
+                }
             }
         }
         for bundleIdentifier in appliedAssignments.keys where working[bundleIdentifier] == nil {
